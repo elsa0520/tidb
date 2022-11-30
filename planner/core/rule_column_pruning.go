@@ -348,7 +348,7 @@ func (ds *DataSource) PruneColumns(parentUsedCols []*expression.Column, opt *log
 		var handleCol *expression.Column
 		var handleColInfo *model.ColumnInfo
 		// case 1: tiflash
-		if ds.tableInfo.TiFlashReplica != nil {
+		if ds.tableInfo.TiFlashReplica != nil && !isLogicalRuleDisabled(&countStarRewriter{}) {
 			handleCol, handleColInfo = preferNotNullColumnFromTable(ds)
 		} else {
 			// case 2: tikv
