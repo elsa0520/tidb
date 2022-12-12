@@ -2227,6 +2227,7 @@ func (p *LogicalJoin) tryToGetMppHashJoin(prop *property.PhysicalProperty, useBC
 			preferredBuildIndex = 1
 		}
 	}
+
 	if forceLeftToBuild || forceRightToBuild {
 		match := (forceLeftToBuild && preferredBuildIndex == 0) || (forceRightToBuild && preferredBuildIndex == 1)
 		if !match {
@@ -2239,6 +2240,13 @@ func (p *LogicalJoin) tryToGetMppHashJoin(prop *property.PhysicalProperty, useBC
 			}
 		}
 	}
+
+	// set preferredBuildIndex for test
+	failpoint.Inject("mockPreferredBuildIndex", func(val failpoint.Value) {
+		if !p.ctx.GetSessionVars().InRestrictedSQL {
+			preferredBuildIndex = val.(int)
+		}
+	})
 
 	baseJoin.InnerChildIdx = preferredBuildIndex
 	childrenProps := make([]*property.PhysicalProperty, 2)

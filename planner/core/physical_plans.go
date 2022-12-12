@@ -16,6 +16,7 @@ package core
 
 import (
 	"fmt"
+	"github.com/pingcap/tipb/go-tipb"
 	"strconv"
 	"unsafe"
 
@@ -37,7 +38,6 @@ import (
 	"github.com/pingcap/tidb/util/size"
 	"github.com/pingcap/tidb/util/stringutil"
 	"github.com/pingcap/tidb/util/tracing"
-	"github.com/pingcap/tipb/go-tipb"
 )
 
 var (
@@ -837,6 +837,9 @@ type PhysicalTableScan struct {
 	tblCols     []*expression.Column
 	tblColHists *statistics.HistColl
 	prop        *property.PhysicalProperty
+
+	// for runtime filter
+	runtimeFilterList []*RuntimeFilter
 }
 
 // Clone implements PhysicalPlan interface.
@@ -1263,6 +1266,7 @@ type PhysicalHashJoin struct {
 	Concurrency     uint
 	EqualConditions []*expression.ScalarFunction
 
+	// null aware equal conditions
 	NAEqualConditions []*expression.ScalarFunction
 
 	// use the outer table to build a hash table when the outer table is smaller.
@@ -1271,6 +1275,9 @@ type PhysicalHashJoin struct {
 	// on which store the join executes.
 	storeTp        kv.StoreType
 	mppShuffleJoin bool
+
+	// for runtime filter
+	runtimeFilterList []*RuntimeFilter
 }
 
 // Clone implements PhysicalPlan interface.
@@ -1328,6 +1335,23 @@ func (p *PhysicalHashJoin) MemoryUsage() (sum int64) {
 		sum += expr.MemoryUsage()
 	}
 	return
+}
+
+// RightIsBuildSide return true when right side is build side
+func (p *PhysicalHashJoin) RightIsBuildSide() bool {
+	if p.UseOuterToBuild {
+		if p.InnerChildIdx == 0 {
+			return true
+		} else {
+			return false
+		}
+	} else {
+		if p.InnerChildIdx == 0 {
+			return false
+		} else {
+			return true
+		}
+	}
 }
 
 // NewPhysicalHashJoin creates a new PhysicalHashJoin from LogicalJoin.

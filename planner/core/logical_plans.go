@@ -57,7 +57,7 @@ var (
 	_ LogicalPlan = &LogicalWindow{}
 )
 
-// JoinType contains CrossJoin, InnerJoin, LeftOuterJoin, RightOuterJoin, FullOuterJoin, SemiJoin.
+// JoinType contains CrossJoin, InnerJoin, LeftOuterJoin, RightOuterJoin, SemiJoin, AntiJoin.
 type JoinType int
 
 const (
@@ -163,6 +163,7 @@ type LogicalJoin struct {
 	rightPreferJoinType uint
 
 	EqualConditions []*expression.ScalarFunction
+	// null aware equal conditions
 	NAEQConditions  []*expression.ScalarFunction
 	LeftConditions  expression.CNFExprs
 	RightConditions expression.CNFExprs

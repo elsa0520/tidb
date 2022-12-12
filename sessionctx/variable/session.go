@@ -1380,6 +1380,16 @@ type SessionVars struct {
 	// LoadBasedReplicaReadThreshold is the threshold for the estimated wait duration of a store.
 	// If exceeding the threshold, try other stores using replica read.
 	LoadBasedReplicaReadThreshold time.Duration
+
+	// Runtime Filter Group
+	// todo set var
+	// Runtime filter enable
+	enableRuntimeFilter bool
+	// Runtime filter type: only support IN or MIN_MAX now.
+	// Runtime filter type can take multiple values at the same time.
+	runtimeFilterTypes []RuntimeFilterType
+	// Runtime filter mode: only support LOCAL now
+	runtimeFilterMode RuntimeFilterMode
 }
 
 // planReplayerSessionFinishedTaskKeyLen is used to control the max size for the finished plan replayer task key in session
@@ -3280,6 +3290,28 @@ func (s *SessionVars) EnableForceInlineCTE() bool {
 	return s.enableForceInlineCTE
 }
 
+func (s *SessionVars) EnableRuntimeFilter() bool {
+	// todo mock return
+	//return s.enableRuntimeFilter
+	return true
+}
+
+// GetRuntimeFilterTypes return the session variable runtimeFilterTypes
+func (s *SessionVars) GetRuntimeFilterTypes() []RuntimeFilterType {
+	// todo mock return
+	if len(s.runtimeFilterTypes) == 0 {
+		s.runtimeFilterTypes = append(s.runtimeFilterTypes, In)
+	}
+	return s.runtimeFilterTypes
+}
+
+// GetRuntimeFilterMode return the session variable runtimeFilterMode
+func (s *SessionVars) GetRuntimeFilterMode() RuntimeFilterMode {
+	// todo
+	//return s.runtimeFilterMode
+	return Local
+}
+
 // protectedTSList implements util/processinfo#ProtectedTSList
 type protectedTSList struct {
 	sync.Mutex
@@ -3328,4 +3360,41 @@ func (lst *protectedTSList) Size() (size int) {
 	size = len(lst.items)
 	lst.Unlock()
 	return
+}
+
+type RuntimeFilterType int64
+
+const (
+	In RuntimeFilterType = iota
+	MinMax
+	// todo BloomFilter, bf/in
+)
+
+func (rfType RuntimeFilterType) String() string {
+	switch rfType {
+	case In:
+		return "IN"
+	case MinMax:
+		return "MIN_MAX"
+	default:
+		return ""
+	}
+}
+
+type RuntimeFilterMode int64
+
+const (
+	Local RuntimeFilterMode = iota + 1
+	Global
+)
+
+func (rfMode RuntimeFilterMode) String() string {
+	switch rfMode {
+	case Local:
+		return "LOCAL"
+	case Global:
+		return "Global"
+	default:
+		return ""
+	}
 }

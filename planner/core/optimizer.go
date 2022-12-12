@@ -20,6 +20,7 @@ import (
 	"math"
 	"runtime"
 	"strconv"
+	"time"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
@@ -39,6 +40,7 @@ import (
 	"github.com/pingcap/tidb/sessionctx"
 	"github.com/pingcap/tidb/sessionctx/variable"
 	"github.com/pingcap/tidb/types"
+	"github.com/pingcap/tidb/util"
 	utilhint "github.com/pingcap/tidb/util/hint"
 	"github.com/pingcap/tidb/util/logutil"
 	"github.com/pingcap/tidb/util/mathutil"
@@ -48,6 +50,7 @@ import (
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 	"golang.org/x/exp/slices"
+
 )
 
 // OptimizeAstNode optimizes the query to a physical plan directly.
@@ -400,7 +403,23 @@ func postOptimize(ctx context.Context, sctx sessionctx.Context, plan PhysicalPla
 	propagateProbeParents(plan, nil)
 	countStarRewrite(plan)
 	disableReuseChunkIfNeeded(sctx, plan)
+	generateRuntimeFilter(sctx, plan)
 	return plan, nil
+}
+
+func generateRuntimeFilter(sctx sessionctx.Context, plan PhysicalPlan) {
+	if !sctx.GetSessionVars().EnableRuntimeFilter() || sctx.GetSessionVars().InRestrictedSQL {
+		return
+	}
+	logutil.BgLogger().Debug("Start runtime filter generator")
+	rfGenerator := &RuntimeFilterGenerator{
+		rfIdGenerator:      &util.IdGenerator{},
+		columnUniqueIdToRF: map[int64][]*RuntimeFilter{},
+	}
+	startRFGenerator := time.Now()
+	rfGenerator.GenerateRuntimeFilter(plan)
+	logutil.BgLogger().Debug("Finish runtime filter generator",
+		zap.Duration("Cost", time.Since(startRFGenerator)))
 }
 
 // prunePhysicalColumns currently only work for MPP(HashJoin<-Exchange).
