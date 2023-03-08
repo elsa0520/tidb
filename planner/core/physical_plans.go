@@ -840,6 +840,7 @@ type PhysicalTableScan struct {
 
 	// for runtime filter
 	runtimeFilterList []*RuntimeFilter
+	maxWaitTimeMs     int
 }
 
 // Clone implements PhysicalPlan interface.
@@ -2052,6 +2053,11 @@ type PhysicalSelection struct {
 	// The flag is only used by cost model for compatibility and will be removed later.
 	// Please see https://github.com/pingcap/tidb/issues/36243 for more details.
 	fromDataSource bool
+
+	// The flag indicates whether this Selection is used for RuntimeFilter
+	// True: Used for RuntimeFilter
+	// False: Only for normal conditions
+	hasRFConditions bool
 }
 
 // Clone implements PhysicalPlan interface.

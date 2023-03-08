@@ -415,6 +415,7 @@ func generateRuntimeFilter(sctx sessionctx.Context, plan PhysicalPlan) {
 	rfGenerator := &RuntimeFilterGenerator{
 		rfIdGenerator:      &util.IdGenerator{},
 		columnUniqueIdToRF: map[int64][]*RuntimeFilter{},
+		parentPhysicalPlan: plan,
 	}
 	startRFGenerator := time.Now()
 	rfGenerator.GenerateRuntimeFilter(plan)

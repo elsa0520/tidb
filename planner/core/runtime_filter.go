@@ -17,13 +17,16 @@ package core
 import (
 	"fmt"
 	"github.com/pingcap/tidb/expression"
+	"github.com/pingcap/tidb/kv"
 	"github.com/pingcap/tidb/parser/ast"
 	"github.com/pingcap/tidb/parser/mysql"
 	"github.com/pingcap/tidb/sessionctx"
+	"github.com/pingcap/tidb/sessionctx/stmtctx"
 	"github.com/pingcap/tidb/sessionctx/variable"
 	"github.com/pingcap/tidb/types"
 	"github.com/pingcap/tidb/util"
 	"github.com/pingcap/tidb/util/logutil"
+	"github.com/pingcap/tipb/go-tipb"
 	"go.uber.org/zap"
 	"strings"
 )
@@ -95,6 +98,10 @@ func (rf *RuntimeFilter) constructRFExpression(ctx sessionctx.Context) error {
 
 func (rf *RuntimeFilter) assign(targetNode *PhysicalTableScan) {
 	rf.targetNode = targetNode
+	if len(rf.targetNode.runtimeFilterList) == 0 {
+		// todo use session variables instead
+		rf.targetNode.maxWaitTimeMs = 10000
+	}
 	rf.buildNode.runtimeFilterList = append(rf.buildNode.runtimeFilterList, rf)
 	rf.targetNode.runtimeFilterList = append(rf.targetNode.runtimeFilterList, rf)
 	logutil.BgLogger().Debug("Assign RF to target node",
@@ -139,4 +146,55 @@ func (rf *RuntimeFilter) String() string {
 	fmt.Fprintf(&builder, "rfExpr=%s", rf.rfExpr.String())
 	builder.WriteString(". ")
 	return builder.String()
+}
+
+func RuntimeFilterListToPB(runtimeFilterList []*RuntimeFilter, sc *stmtctx.StatementContext, client kv.Client) ([]*tipb.RuntimeFilter, error) {
+	var result []*tipb.RuntimeFilter
+	for _, runtimeFilter := range runtimeFilterList {
+		rfPB, err := runtimeFilter.ToPB(sc, client)
+		if rfPB == nil {
+			return nil, err
+		}
+		result = append(result, rfPB)
+	}
+	return result, nil
+}
+
+func (rf *RuntimeFilter) ToPB(sc *stmtctx.StatementContext, client kv.Client) (*tipb.RuntimeFilter, error) {
+	pc := expression.NewPBConverter(client, sc)
+	srcExprPB := pc.ExprToPB(rf.srcExpr)
+	if srcExprPB == nil {
+		return nil, ErrInternal.GenWithStack("failed to transform src expr %s to pb in runtime filter", rf.srcExpr.String())
+	}
+	targetExprPB := pc.ExprToPB(rf.targetExpr)
+	if targetExprPB == nil {
+		return nil, ErrInternal.GenWithStack("failed to transform target expr %s to pb in runtime filter", rf.targetExpr.String())
+	}
+	rfExprPB := pc.ExprToPB(rf.rfExpr)
+	if rfExprPB == nil {
+		return nil, ErrInternal.GenWithStack("failed to transform rf expr %s to pb in runtime filter", rf.rfExpr.String())
+	}
+	rfTypePB := tipb.RuntimeFilterType_IN
+	switch rf.rfType {
+	case variable.In:
+		rfTypePB = tipb.RuntimeFilterType_IN
+	case variable.MinMax:
+		rfTypePB = tipb.RuntimeFilterType_MIN_MAX
+	}
+	rfModePB := tipb.RuntimeFilterMode_LOCAL
+	switch rf.rfMode {
+	case variable.Local:
+		rfModePB = tipb.RuntimeFilterMode_LOCAL
+	}
+	result := &tipb.RuntimeFilter{
+		Id:               int32(rf.id),
+		SourceExpr:       srcExprPB,
+		TargetExpr:       targetExprPB,
+		SourceExecutorId: rf.buildNode.ExplainID().String(),
+		TargetExecutorId: rf.targetNode.ExplainID().String(),
+		RfExpr:           rfExprPB,
+		RfType:           rfTypePB,
+		RfMode:           rfModePB,
+	}
+	return result, nil
 }

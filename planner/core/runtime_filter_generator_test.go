@@ -78,6 +78,7 @@ func TestRuntimeFilterGenerator(t *testing.T) {
 		failpoint.Disable("github.com/pingcap/tidb/planner/core/mockPreferredBuildIndex")
 	}()
 	for i, ts := range input {
+		fmt.Println(fmt.Sprintf("query %d", i))
 		testdata.OnRecord(func() {
 			output[i].SQL = ts
 			output[i].Plan = testdata.ConvertRowsToStrings(tk.MustQuery("explain " + ts).Rows())

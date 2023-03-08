@@ -101,7 +101,8 @@
           "      │ └─ExchangeSender_13 1.00 mpp[tiflash]  ExchangeType: Broadcast",
           "      │   └─Projection_11 1.00 mpp[tiflash]  test.t1.k1, plus(test.t1.k1, 1)->Column#7",
           "      │     └─TableFullScan_12 1.00 mpp[tiflash] table:t1 keep order:false",
-          "      └─TableFullScan_15(Probe) 1.00 mpp[tiflash] table:t2 keep order:false, runtime filter:0[IN] -> test.t2.k1"
+          "      └─Selection_21(Probe) 1.00 mpp[tiflash]  ",
+          "        └─TableFullScan_15 1.00 mpp[tiflash] table:t2 keep order:false, runtime filter:0[IN] -> test.t2.k1"
         ]
       },
       {

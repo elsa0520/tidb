@@ -26,8 +26,10 @@ import (
 
 // RuntimeFilterGenerator One plan one generator
 type RuntimeFilterGenerator struct {
-	rfIdGenerator      *util.IdGenerator
-	columnUniqueIdToRF map[int64][]*RuntimeFilter
+	rfIdGenerator                 *util.IdGenerator
+	columnUniqueIdToRF            map[int64][]*RuntimeFilter
+	parentPhysicalPlan            PhysicalPlan
+	childIdxForParentPhysicalPlan int
 }
 
 // GenerateRuntimeFilter is the root method.
@@ -42,11 +44,19 @@ func (generator *RuntimeFilterGenerator) GenerateRuntimeFilter(plan PhysicalPlan
 	case *PhysicalTableScan:
 		generator.assignRuntimeFilter(physicalPlan)
 	case *PhysicalTableReader:
+		generator.parentPhysicalPlan = plan
+		generator.childIdxForParentPhysicalPlan = 0
 		generator.GenerateRuntimeFilter(physicalPlan.tablePlan)
+		physicalTableReader := plan.(*PhysicalTableReader)
+		if physicalTableReader.StoreType == kv.TiFlash {
+			physicalTableReader.TablePlans = flattenPushDownPlan(physicalTableReader.tablePlan)
+		}
 	}
 
 	// todo consider left build right probe
-	for _, children := range plan.Children() {
+	for i, children := range plan.Children() {
+		generator.parentPhysicalPlan = plan
+		generator.childIdxForParentPhysicalPlan = i
 		generator.GenerateRuntimeFilter(children)
 	}
 }
@@ -102,6 +112,7 @@ func (generator *RuntimeFilterGenerator) assignRuntimeFilter(plan PhysicalPlan) 
 	}
 
 	cacheBuildNodeIdToRFMode := map[int]RuntimeFilterMode{}
+	var currentRFExprList []expression.Expression
 	for i, runtimeFilter := range rfListForCurrentScan {
 		// compute rf mode
 		var rfMode RuntimeFilterMode
@@ -123,6 +134,21 @@ func (generator *RuntimeFilterGenerator) assignRuntimeFilter(plan PhysicalPlan) 
 		runtimeFilter.rfMode = rfMode
 		// assign rf to current node
 		runtimeFilter.assign(physicalTableScan)
+		currentRFExprList = append(currentRFExprList, runtimeFilter.rfExpr)
+	}
+
+	if len(currentRFExprList) == 0 {
+		return
+	}
+	// supply selection if there is no predicates above target scan node
+	if parent, ok := generator.parentPhysicalPlan.(*PhysicalSelection); !ok {
+		// StatsInfo: Just set a placeholder value here, and this value will not be used in subsequent optimizations
+		sel := PhysicalSelection{hasRFConditions: true}.Init(plan.SCtx(), plan.statsInfo(), plan.SelectBlockOffset())
+		sel.fromDataSource = true
+		sel.SetChildren(plan)
+		generator.parentPhysicalPlan.SetChild(generator.childIdxForParentPhysicalPlan, sel)
+	} else {
+		parent.hasRFConditions = true
 	}
 
 	// todo
