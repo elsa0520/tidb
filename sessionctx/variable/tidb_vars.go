@@ -950,6 +950,12 @@ const (
 	// TiDBTTLRunningTasks limits the count of running ttl tasks. Default to 0, means 3 times the count of TiKV (or no
 	// limitation, if the storage is not TiKV).
 	TiDBTTLRunningTasks = "tidb_ttl_running_tasks"
+	// EnableRuntimeFilter control runtime filter, true: runtime filter open.
+	EnableRuntimeFilter = "enable_runtime_filter"
+	// RuntimeFilterTypeName the value of is string, a runtime filter type list split by ",", such as: "IN,MIN_MAX"
+	RuntimeFilterTypeName = "runtime_filter_type"
+	// RuntimeFilterModeName the mode of runtime filter, such as "LOCAL"
+	RuntimeFilterModeName = "runtime_filter_mode"
 )
 
 // TiDB intentional limits
@@ -1219,6 +1225,9 @@ const (
 	DefTiDBEnablePlanCacheForParamLimit                    = true
 	DefTiDBEnablePlanCacheForSubquery                      = true
 	DefTiDBLoadBasedReplicaReadThreshold                   = 0
+	DefEnableRuntimeFilter                                 = false
+	DefRuntimeFilterType                                   = "IN"
+	DefRuntimeFilterMode                                   = "LOCAL"
 )
 
 // Process global variables.

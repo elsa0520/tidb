@@ -2410,6 +2410,59 @@ var defaultSysVars = []*SysVar{
 	}, GetGlobal: func(ctx context.Context, vars *SessionVars) (string, error) {
 		return strconv.Itoa(int(TTLRunningTasks.Load())), nil
 	}},
+	// runtime filter variables group
+	{Scope: ScopeGlobal | ScopeSession, Name: EnableRuntimeFilter, Value: BoolToOnOff(DefEnableRuntimeFilter), Type: TypeBool,
+		SetSession: func(s *SessionVars, val string) error {
+			s.enableRuntimeFilter = TiDBOptOn(val)
+			return nil
+		},
+		GetSession: func(s *SessionVars) (string, error) {
+			return BoolToOnOff(s.enableRuntimeFilter), nil
+		},
+	},
+	{Scope: ScopeGlobal | ScopeSession, Name: RuntimeFilterTypeName, Value: DefRuntimeFilterType, Type: TypeStr,
+		Validation: func(_ *SessionVars, normalizedValue string, originalValue string, _ ScopeFlag) (string, error) {
+			_, ok := ToRuntimeFilterType(normalizedValue)
+			if ok {
+				return normalizedValue, nil
+			}
+			errMsg := fmt.Sprintf("incorrect value: %s. %s should be sepreated by , such as %s, also we only support IN and MIN_MAX now. ",
+				originalValue, RuntimeFilterTypeName, DefRuntimeFilterType)
+			return normalizedValue, errors.New(errMsg)
+		},
+		SetSession: func(s *SessionVars, val string) error {
+			s.runtimeFilterTypes, _ = ToRuntimeFilterType(val)
+			return nil
+		},
+		GetSession: func(s *SessionVars) (string, error) {
+			if len(s.runtimeFilterTypes) == 0 {
+				return "", nil
+			}
+			result := fmt.Sprintf(s.runtimeFilterTypes[0].String())
+			for i := 1; i < len(s.runtimeFilterTypes); i++ {
+				result += fmt.Sprintf(",%s", s.runtimeFilterTypes[i].String())
+			}
+			return result, nil
+		},
+	},
+	{Scope: ScopeGlobal | ScopeSession, Name: RuntimeFilterModeName, Value: DefRuntimeFilterMode, Type: TypeStr,
+		Validation: func(_ *SessionVars, normalizedValue string, originalValue string, _ ScopeFlag) (string, error) {
+			_, ok := RuntimeFilterModeStringToMode(normalizedValue)
+			if ok {
+				return normalizedValue, nil
+			}
+			errMsg := fmt.Sprintf("incorrect value: %s. %s options: %s ",
+				originalValue, RuntimeFilterModeName, DefRuntimeFilterMode)
+			return normalizedValue, errors.New(errMsg)
+		},
+		SetSession: func(s *SessionVars, val string) error {
+			s.runtimeFilterMode, _ = RuntimeFilterModeStringToMode(val)
+			return nil
+		},
+		GetSession: func(s *SessionVars) (string, error) {
+			return s.runtimeFilterMode.String(), nil
+		},
+	},
 }
 
 // FeedbackProbability points to the FeedbackProbability in statistics package.

@@ -148,6 +148,27 @@ func (rf *RuntimeFilter) String() string {
 	return builder.String()
 }
 
+func (rf *RuntimeFilter) Clone() (*RuntimeFilter, error) {
+	cloned := new(RuntimeFilter)
+	cloned.id = rf.id
+	base, err := rf.buildNode.Clone()
+	if err != nil {
+		return nil, err
+	}
+	cloned.buildNode = base.(*PhysicalHashJoin)
+	base, err = rf.targetNode.Clone()
+	if err != nil {
+		return nil, err
+	}
+	cloned.targetNode = base.(*PhysicalTableScan)
+	cloned.srcExpr = rf.srcExpr.Clone().(*expression.Column)
+	cloned.targetExpr = rf.targetExpr.Clone().(*expression.Column)
+	cloned.rfType = rf.rfType
+	cloned.rfMode = rf.rfMode
+	cloned.rfExpr = rf.rfExpr.Clone()
+	return cloned, nil
+}
+
 func RuntimeFilterListToPB(runtimeFilterList []*RuntimeFilter, sc *stmtctx.StatementContext, client kv.Client) ([]*tipb.RuntimeFilter, error) {
 	var result []*tipb.RuntimeFilter
 	for _, runtimeFilter := range runtimeFilterList {

@@ -864,6 +864,13 @@ func (ts *PhysicalTableScan) Clone() (PhysicalPlan, error) {
 		clonedScan.Hist = ts.Hist.Copy()
 	}
 	clonedScan.rangeInfo = ts.rangeInfo
+	for _, rf := range ts.runtimeFilterList {
+		clonedRF, err1 := rf.Clone()
+		if err1 != nil {
+			return nil, err1
+		}
+		clonedScan.runtimeFilterList = append(clonedScan.runtimeFilterList, clonedRF)
+	}
 	return clonedScan, nil
 }
 
@@ -1296,6 +1303,13 @@ func (p *PhysicalHashJoin) Clone() (PhysicalPlan, error) {
 	}
 	for _, c := range p.NAEqualConditions {
 		cloned.NAEqualConditions = append(cloned.NAEqualConditions, c.Clone().(*expression.ScalarFunction))
+	}
+	for _, rf := range p.runtimeFilterList {
+		clonedRF, err1 := rf.Clone()
+		if err1 != nil {
+			return nil, err1
+		}
+		cloned.runtimeFilterList = append(cloned.runtimeFilterList, clonedRF)
 	}
 	return cloned, nil
 }
@@ -2069,6 +2083,7 @@ func (p *PhysicalSelection) Clone() (PhysicalPlan, error) {
 	}
 	cloned.basePhysicalPlan = *base
 	cloned.Conditions = util.CloneExprs(p.Conditions)
+	cloned.hasRFConditions = p.hasRFConditions
 	return cloned, nil
 }
 

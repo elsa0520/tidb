@@ -73,6 +73,7 @@ func TestRuntimeFilterGenerator(t *testing.T) {
 	planSuiteData := core.GetRuntimeFilterGeneratorData()
 	planSuiteData.LoadTestCases(t, &input, &output)
 	tk.MustExec("set @@tidb_allow_mpp=1; set @@tidb_enforce_mpp=1;")
+	tk.MustExec("set enable_runtime_filter=true;")
 	require.NoError(t, failpoint.Enable("github.com/pingcap/tidb/planner/core/mockPreferredBuildIndex", fmt.Sprintf(`return(%d)`, 0)))
 	defer func() {
 		failpoint.Disable("github.com/pingcap/tidb/planner/core/mockPreferredBuildIndex")

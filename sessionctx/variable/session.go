@@ -3291,17 +3291,11 @@ func (s *SessionVars) EnableForceInlineCTE() bool {
 }
 
 func (s *SessionVars) EnableRuntimeFilter() bool {
-	// todo mock return
-	//return s.enableRuntimeFilter
-	return true
+	return s.enableRuntimeFilter
 }
 
 // GetRuntimeFilterTypes return the session variable runtimeFilterTypes
 func (s *SessionVars) GetRuntimeFilterTypes() []RuntimeFilterType {
-	// todo mock return
-	if len(s.runtimeFilterTypes) == 0 {
-		s.runtimeFilterTypes = append(s.runtimeFilterTypes, In)
-	}
 	return s.runtimeFilterTypes
 }
 
@@ -3381,6 +3375,43 @@ func (rfType RuntimeFilterType) String() string {
 	}
 }
 
+// RuntimeFilterTypeStringToType convert RuntimeFilterTypeNameString to RuntimeFilterType
+// If name is legal, it will return Runtime Filter Type and true
+// Elsa, it will return -1 and false
+// The second param means the convert is ok or not. Ture is ok, false means it is illegal name
+// At present, we only support two names: "IN" and "MIN_MAX"
+func RuntimeFilterTypeStringToType(name string) (RuntimeFilterType, bool) {
+	switch name {
+	case "IN":
+		return In, true
+	case "MIN_MAX":
+		return MinMax, true
+	default:
+		return -1, false
+	}
+}
+
+// ToRuntimeFilterType convert session var value to RuntimeFilterType list
+// If sessionVarValue is legal, it will return RuntimeFilterType list and true
+// The second param means the convert is ok or not. Ture is ok, false means it is illegal value
+// The legal value should be comma-separated, eg: "IN,MIN_MAX"
+func ToRuntimeFilterType(sessionVarValue string) ([]RuntimeFilterType, bool) {
+	typeNameList := strings.Split(sessionVarValue, ",")
+	rfTypeMap := make(map[RuntimeFilterType]bool)
+	for _, typeName := range typeNameList {
+		rfType, ok := RuntimeFilterTypeStringToType(strings.ToUpper(typeName))
+		if !ok {
+			return nil, ok
+		}
+		rfTypeMap[rfType] = true
+	}
+	rfTypeList := make([]RuntimeFilterType, 0, len(rfTypeMap))
+	for rfType := range rfTypeMap {
+		rfTypeList = append(rfTypeList, rfType)
+	}
+	return rfTypeList, true
+}
+
 type RuntimeFilterMode int64
 
 const (
@@ -3396,5 +3427,19 @@ func (rfMode RuntimeFilterMode) String() string {
 		return "Global"
 	default:
 		return ""
+	}
+}
+
+// RuntimeFilterModeStringToMode convert RuntimeFilterModeString to RuntimeFilterMode
+// If name is legal, it will return Runtime Filter Mode and true
+// Elsa, it will return -1 and false
+// The second param means the convert is ok or not. Ture is ok, false means it is illegal name
+// At present, we only support one name: "LOCAL"
+func RuntimeFilterModeStringToMode(name string) (RuntimeFilterMode, bool) {
+	switch name {
+	case "LOCAL":
+		return Local, true
+	default:
+		return -1, false
 	}
 }
