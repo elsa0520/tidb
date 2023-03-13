@@ -45,6 +45,10 @@ type RuntimeFilter struct {
 	// The following properties need to be set after assigning a scan node to RF
 	rfMode     RuntimeFilterMode
 	targetNode *PhysicalTableScan
+	// The explain id will be set when runtime filter clone()
+	// It is only used for runtime filter pb
+	buildNodeExplainId  string
+	targetNodeExplainId string
 }
 
 func NewRuntimeFilter(rfIdGenerator *util.IdGenerator, eqPredicate *expression.ScalarFunction, buildNode *PhysicalHashJoin) ([]*RuntimeFilter, int64) {
@@ -151,16 +155,19 @@ func (rf *RuntimeFilter) String() string {
 func (rf *RuntimeFilter) Clone() (*RuntimeFilter, error) {
 	cloned := new(RuntimeFilter)
 	cloned.id = rf.id
-	base, err := rf.buildNode.Clone()
-	if err != nil {
-		return nil, err
+	// Because build node only needs to get its executor id attribute when converting to pb format,
+	// so we only copy explain id here
+	if rf.buildNode == nil {
+		cloned.buildNodeExplainId = rf.buildNodeExplainId
+	} else {
+		cloned.buildNodeExplainId = rf.buildNode.ExplainID().String()
 	}
-	cloned.buildNode = base.(*PhysicalHashJoin)
-	base, err = rf.targetNode.Clone()
-	if err != nil {
-		return nil, err
+	if rf.targetNode == nil {
+		cloned.targetNodeExplainId = rf.targetNodeExplainId
+	} else {
+		cloned.targetNodeExplainId = rf.targetNode.ExplainID().String()
 	}
-	cloned.targetNode = base.(*PhysicalTableScan)
+
 	cloned.srcExpr = rf.srcExpr.Clone().(*expression.Column)
 	cloned.targetExpr = rf.targetExpr.Clone().(*expression.Column)
 	cloned.rfType = rf.rfType
@@ -211,8 +218,8 @@ func (rf *RuntimeFilter) ToPB(sc *stmtctx.StatementContext, client kv.Client) (*
 		Id:               int32(rf.id),
 		SourceExpr:       srcExprPB,
 		TargetExpr:       targetExprPB,
-		SourceExecutorId: rf.buildNode.ExplainID().String(),
-		TargetExecutorId: rf.targetNode.ExplainID().String(),
+		SourceExecutorId: rf.buildNodeExplainId,
+		TargetExecutorId: rf.targetNodeExplainId,
 		RfExpr:           rfExprPB,
 		RfType:           rfTypePB,
 		RfMode:           rfModePB,
