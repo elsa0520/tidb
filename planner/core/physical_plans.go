@@ -864,6 +864,7 @@ func (ts *PhysicalTableScan) Clone() (PhysicalPlan, error) {
 		clonedScan.Hist = ts.Hist.Copy()
 	}
 	clonedScan.rangeInfo = ts.rangeInfo
+	clonedScan.runtimeFilterList = clonedScan.runtimeFilterList[:0]
 	for _, rf := range ts.runtimeFilterList {
 		clonedRF, err1 := rf.Clone()
 		if err1 != nil {
