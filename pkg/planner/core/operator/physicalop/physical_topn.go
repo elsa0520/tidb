@@ -352,7 +352,7 @@ func getPhysTopN(lt *logicalop.LogicalTopN, prop *property.PhysicalProperty) []b
 // The actual check of whether PartialOrderInfo can pass through Projection
 // is done in LogicalProjection.TryToGetChildProp during physical optimization.
 func canUsePartialOrder4TopN(lt *logicalop.LogicalTopN) bool {
-	if !lt.SCtx().GetSessionVars().OptPartialOrderedIndexForTopN {
+	if lt.SCtx().GetSessionVars().OptPartialOrderedIndexForTopN != "COST" {
 		return false
 	}
 	// Must have ORDER BY columns
@@ -409,6 +409,37 @@ func getPhysTopNWithPartialOrderProperty(lt *logicalop.LogicalTopN, prop *proper
 		})
 	}
 
+	// Check if there's a use_index hint and whether it can match partial order
+	// We need to traverse through Selection/Projection to find the DataSource
+	ds := findDataSourceFromTopN(lt)
+	if ds != nil && len(ds.PossibleAccessPaths) > 0 {
+		// Check if there are any forced paths (use_index hint)
+		hasForcedPath := false
+		hasMatchingForcedPath := false
+		
+		partialOrderInfo := &property.PartialOrderInfo{SortItems: sortItems}
+		
+		for _, path := range ds.PossibleAccessPaths {
+			if path.Forced {
+				hasForcedPath = true
+				// Check if this forced path can match partial order
+				if !path.IsTablePath() {
+					matchResult := matchPartialOrderPropertyForPath(path, partialOrderInfo)
+					if matchResult.Matched {
+						hasMatchingForcedPath = true
+						break
+					}
+				}
+			}
+		}
+		
+		// If use_index hint is present but no forced index can match partial order,
+		// don't generate PartialOrderInfo property (degrade to normal use_index behavior)
+		if hasForcedPath && !hasMatchingForcedPath {
+			return nil
+		}
+	}
+
 	// Create PhysicalProperty with PartialOrderInfo
 	// Use CopMultiReadTaskType for IndexLookUp
 	partialOrderProp := &property.PhysicalProperty{
@@ -431,4 +462,92 @@ func getPhysTopNWithPartialOrderProperty(lt *logicalop.LogicalTopN, prop *proper
 	topN.SetSchema(lt.Schema())
 
 	return []base.PhysicalPlan{topN}
+}
+
+// findDataSourceFromTopN traverses through Selection/Projection to find the underlying DataSource
+func findDataSourceFromTopN(lt *logicalop.LogicalTopN) *logicalop.DataSource {
+	if len(lt.Children()) == 0 {
+		return nil
+	}
+	
+	child := lt.Children()[0]
+	for {
+		switch p := child.(type) {
+		case *logicalop.DataSource:
+			return p
+		case *logicalop.LogicalSelection:
+			if len(p.Children()) > 0 {
+				child = p.Children()[0]
+				continue
+			}
+			return nil
+		case *logicalop.LogicalProjection:
+			if len(p.Children()) > 0 {
+				child = p.Children()[0]
+				continue
+			}
+			return nil
+		default:
+			return nil
+		}
+	}
+}
+
+// matchPartialOrderPropertyForPath is a helper function to check if a path matches partial order
+// This is extracted to avoid import cycles
+func matchPartialOrderPropertyForPath(path *util.AccessPath, partialOrderInfo *property.PartialOrderInfo) property.PartialOrderMatchResult {
+	emptyResult := property.PartialOrderMatchResult{Matched: false}
+	
+	if partialOrderInfo == nil || path.Index == nil || len(path.IdxCols) == 0 {
+		return emptyResult
+	}
+	
+	sortItems := partialOrderInfo.SortItems
+	if len(sortItems) == 0 {
+		return emptyResult
+	}
+	
+	allSameOrder, _ := partialOrderInfo.AllSameOrder()
+	if !allSameOrder {
+		return emptyResult
+	}
+	
+	// Check if index columns can match ORDER BY columns (allowing prefix index)
+	if len(path.IdxCols) > len(sortItems) {
+		return emptyResult
+	}
+	
+	// The last column of the index must be a prefix column
+	if path.IdxColLens[len(path.IdxCols)-1] == types.UnspecifiedLength {
+		return emptyResult
+	}
+	
+	// Extract ORDER BY columns
+	orderByCols := make([]*expression.Column, 0, len(sortItems))
+	for _, item := range sortItems {
+		orderByCols = append(orderByCols, item.Col)
+	}
+	
+	for i := range path.IdxCols {
+		// check if the same column
+		if !orderByCols[i].EqualColumn(path.IdxCols[i]) {
+			return emptyResult
+		}
+		
+		// meet prefix index column, match termination
+		if path.IdxColLens[i] != types.UnspecifiedLength {
+			// If we meet a prefix column but it's not the last index column, it's not supported
+			if i != len(path.IdxCols)-1 {
+				return emptyResult
+			}
+			// Encountered a prefix index column
+			return property.PartialOrderMatchResult{
+				Matched:   true,
+				PrefixCol: path.IdxCols[i],
+				PrefixLen: path.IdxColLens[i],
+			}
+		}
+	}
+	
+	return emptyResult
 }
