@@ -24,6 +24,7 @@ import (
 
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/tidb/pkg/executor/internal/exec"
+	"github.com/pingcap/tidb/pkg/expression"
 	"github.com/pingcap/tidb/pkg/planner/core/operator/physicalop"
 	"github.com/pingcap/tidb/pkg/sessionctx/vardef"
 	"github.com/pingcap/tidb/pkg/util"
@@ -68,6 +69,9 @@ type TopNExec struct {
 
 	// ColumnIdxsUsedByChild keep column indexes of child executor used for inline projection
 	ColumnIdxsUsedByChild []int
+
+	TruncateKeyExprs            []expression.Expression
+	TruncateKeyPrefixCharCounts []int
 }
 
 // Open implements the Executor Open interface.
