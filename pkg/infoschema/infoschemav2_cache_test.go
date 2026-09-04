@@ -17,7 +17,9 @@ package infoschema
 import (
 	"context"
 	"testing"
+	"time"
 
+	"github.com/pingcap/tidb/pkg/config/diagnosticmode"
 	"github.com/pingcap/tidb/pkg/infoschema/internal"
 	"github.com/pingcap/tidb/pkg/kv"
 	"github.com/pingcap/tidb/pkg/meta/autoid"
@@ -39,6 +41,17 @@ type testCase struct {
 	r   autoid.Requirement
 	is  infoschemaV2
 	t   *testing.T
+}
+
+func TestShouldStartInfoSchemaGC(t *testing.T) {
+	t.Cleanup(diagnosticmode.SetForTest(false))
+	lastCheckTime := time.Now().Add(-2 * time.Minute)
+	require.True(t, shouldStartInfoSchemaGC(gcCheckInterval+1, 0, lastCheckTime))
+
+	t.Run("diagnostic mode", func(t *testing.T) {
+		t.Cleanup(diagnosticmode.SetForTest(true))
+		require.False(t, shouldStartInfoSchemaGC(gcCheckInterval+1, 0, lastCheckTime))
+	})
 }
 
 type cacheOp int

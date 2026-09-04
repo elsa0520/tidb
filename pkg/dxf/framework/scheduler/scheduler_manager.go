@@ -21,6 +21,7 @@ import (
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
+	"github.com/pingcap/tidb/pkg/config/diagnosticmode"
 	"github.com/pingcap/tidb/pkg/config/kerneltype"
 	"github.com/pingcap/tidb/pkg/dxf/framework/dxfmetric"
 	"github.com/pingcap/tidb/pkg/dxf/framework/dxfutil"
@@ -172,7 +173,9 @@ func (sm *Manager) Start() {
 	sm.nodeMgr.refreshNodes(sm.ctx, sm.taskMgr, sm.slotMgr)
 
 	sm.wg.Run(sm.scheduleTaskLoop)
-	sm.wg.Run(sm.gcSubtaskHistoryTableLoop)
+	if shouldStartSubtaskHistoryGC() {
+		sm.wg.Run(sm.gcSubtaskHistoryTableLoop)
+	}
 	sm.wg.Run(sm.cleanTaskLoop)
 	sm.wg.Run(sm.collectLoop)
 	sm.wg.Run(func() {
@@ -185,6 +188,10 @@ func (sm *Manager) Start() {
 		sm.balancer.balanceLoop(sm.ctx, sm)
 	})
 	sm.initialized = true
+}
+
+func shouldStartSubtaskHistoryGC() bool {
+	return !diagnosticmode.Enabled()
 }
 
 // Cancel cancels the scheduler manager.

@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/pingcap/log"
+	"github.com/pingcap/tidb/pkg/config/diagnosticmode"
 	"github.com/pingcap/tidb/pkg/ddl"
 	"github.com/pingcap/tidb/pkg/infoschema"
 	"github.com/pingcap/tidb/pkg/owner"
@@ -29,6 +30,21 @@ import (
 )
 
 type stubOwnerManager struct{ owner.Manager }
+
+func TestNewRunawayRecordGCTicker(t *testing.T) {
+	t.Cleanup(diagnosticmode.SetForTest(false))
+	ticker, tickerCh := newRunawayRecordGCTicker(time.Hour)
+	require.NotNil(t, ticker)
+	require.NotNil(t, tickerCh)
+	ticker.Stop()
+
+	t.Run("diagnostic mode", func(t *testing.T) {
+		t.Cleanup(diagnosticmode.SetForTest(true))
+		diagnosticTicker, diagnosticTickerCh := newRunawayRecordGCTicker(time.Hour)
+		require.Nil(t, diagnosticTicker)
+		require.Nil(t, diagnosticTickerCh)
+	})
+}
 
 func (stubOwnerManager) IsOwner() bool { return true }
 

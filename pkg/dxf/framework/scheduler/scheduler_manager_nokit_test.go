@@ -22,6 +22,7 @@ import (
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
+	"github.com/pingcap/tidb/pkg/config/diagnosticmode"
 	"github.com/pingcap/tidb/pkg/domain/sqlsvrapi"
 	sqlsvrapimock "github.com/pingcap/tidb/pkg/domain/sqlsvrapi/mock"
 	"github.com/pingcap/tidb/pkg/dxf/framework/dxfutil"
@@ -40,6 +41,16 @@ import (
 type storeWithKS struct {
 	kv.Storage
 	ks string
+}
+
+func TestShouldStartSubtaskHistoryGC(t *testing.T) {
+	t.Cleanup(diagnosticmode.SetForTest(false))
+	require.True(t, shouldStartSubtaskHistoryGC())
+
+	t.Run("diagnostic mode", func(t *testing.T) {
+		t.Cleanup(diagnosticmode.SetForTest(true))
+		require.False(t, shouldStartSubtaskHistoryGC())
+	})
 }
 
 type batchCleanerCallRecorder struct {

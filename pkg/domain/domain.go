@@ -876,7 +876,7 @@ func (do *Domain) Start(startMode ddl.StartMode) error {
 	// they are only used in the path of creating session when the runtime is
 	// Acquired with a holder ID, so it's ok. we cannot remove those calls now
 	// as explained in the comments of GetKSStore.
-	if kv.IsSystemKS(do.store) {
+	if kv.IsSystemKS(do.store) && shouldRunBackgroundGC() {
 		do.wg.Run(func() {
 			do.crossKSSessMgr.RunSystemKSGCLoop(do.ctx)
 		}, "crossKSSessMgrGCLoop")
@@ -965,6 +965,10 @@ func (do *Domain) ExternalWorkloadManager() extworkload.Manager {
 }
 
 func shouldStartLogBackupAdvancer() bool {
+	return !diagnosticmode.Enabled()
+}
+
+func shouldRunBackgroundGC() bool {
 	return !diagnosticmode.Enabled()
 }
 
@@ -1654,11 +1658,18 @@ func (do *Domain) globalBindHandleWorkerLoop(owner owner.Manager) {
 		defer util.Recover(metrics.LabelDomain, "globalBindHandleWorkerLoop", nil, false)
 
 		bindWorkerTicker := time.NewTicker(bindinfo.Lease)
-		gcBindTicker := time.NewTicker(100 * bindinfo.Lease)
+		var gcBindTicker *time.Ticker
+		var gcBindTickerCh <-chan time.Time
+		if shouldRunBackgroundGC() {
+			gcBindTicker = time.NewTicker(100 * bindinfo.Lease)
+			gcBindTickerCh = gcBindTicker.C
+		}
 		writeBindingUsageTicker := time.NewTicker(100 * bindinfo.Lease)
 		defer func() {
 			bindWorkerTicker.Stop()
-			gcBindTicker.Stop()
+			if gcBindTicker != nil {
+				gcBindTicker.Stop()
+			}
 			writeBindingUsageTicker.Stop()
 		}()
 		for {
@@ -1673,7 +1684,7 @@ func (do *Domain) globalBindHandleWorkerLoop(owner owner.Manager) {
 				if err != nil {
 					logutil.BgLogger().Error("update bindinfo failed", zap.Error(err))
 				}
-			case <-gcBindTicker.C:
+			case <-gcBindTickerCh:
 				if !owner.IsOwner() {
 					continue
 				}
@@ -1889,6 +1900,10 @@ func (do *Domain) GetDumpFileGCChecker() *dumpFileGcChecker {
 
 // DumpFileGcCheckerLoop creates a goroutine that handles `exit` and `gc`.
 func (do *Domain) DumpFileGcCheckerLoop() {
+	if !shouldRunBackgroundGC() {
+		logutil.BgLogger().Info("don't run dump file GC checker", zap.String("reason", "diagnostic mode"))
+		return
+	}
 	do.wg.Run(func() {
 		logutil.BgLogger().Info("dumpFileGcChecker started")
 		gcTicker := time.NewTicker(do.dumpFileGcChecker.gcLease)
@@ -2028,9 +2043,11 @@ func (do *Domain) UpdateTableStatsLoop() error {
 			return err
 		}
 	}
-	do.wg.Run(func() {
-		do.indexUsageWorker()
-	}, "indexUsageWorker")
+	if shouldRunBackgroundGC() {
+		do.wg.Run(func() {
+			do.indexUsageWorker()
+		}, "indexUsageWorker")
+	}
 	if do.statsLease <= 0 {
 		// For statsLease > 0, `gcStatsWorker` handles the quit of stats owner.
 		do.wg.Run(func() { quitStatsOwner(do, do.statsOwner) }, "quitStatsOwner")
@@ -2270,12 +2287,19 @@ func (do *Domain) gcStatsWorker() {
 	defer util.Recover(metrics.LabelDomain, "gcStatsWorker", nil, false)
 	logutil.BgLogger().Info("gcStatsWorker started.")
 	lease := do.statsLease
-	gcStatsTicker := time.NewTicker(100 * lease)
+	var gcStatsTicker *time.Ticker
+	var gcStatsTickerCh <-chan time.Time
+	if shouldRunBackgroundGC() {
+		gcStatsTicker = time.NewTicker(100 * lease)
+		gcStatsTickerCh = gcStatsTicker.C
+	}
 	updateStatsHealthyTicker := time.NewTicker(20 * lease)
 	readMemTicker := time.NewTicker(memory.ReadMemInterval)
 	statsHandle := do.StatsHandle()
 	defer func() {
-		gcStatsTicker.Stop()
+		if gcStatsTicker != nil {
+			gcStatsTicker.Stop()
+		}
 		readMemTicker.Stop()
 		updateStatsHealthyTicker.Stop()
 		do.SetStatsUpdating(false)
@@ -2288,7 +2312,7 @@ func (do *Domain) gcStatsWorker() {
 		case <-do.exit:
 			do.gcStatsWorkerExitPreprocessing()
 			return
-		case <-gcStatsTicker.C:
+		case <-gcStatsTickerCh:
 			if !do.statsOwner.IsOwner() {
 				continue
 			}
@@ -2420,21 +2444,28 @@ func (do *Domain) analyzeJobsCleanupWorker() {
 	// For GC.
 	const gcInterval = time.Hour
 	const daysToKeep = 7
-	gcTicker := time.NewTicker(gcInterval)
+	var gcTicker *time.Ticker
+	var gcTickerCh <-chan time.Time
+	if shouldRunBackgroundGC() {
+		gcTicker = time.NewTicker(gcInterval)
+		gcTickerCh = gcTicker.C
+	}
 	// For clean up.
 	// Default stats lease is 3 * time.Second.
 	// So cleanupInterval is 100 * 3 * time.Second = 5 * time.Minute.
 	var cleanupInterval = do.statsLease * 100
 	cleanupTicker := time.NewTicker(cleanupInterval)
 	defer func() {
-		gcTicker.Stop()
+		if gcTicker != nil {
+			gcTicker.Stop()
+		}
 		cleanupTicker.Stop()
 		logutil.BgLogger().Info("analyzeJobsCleanupWorker exited.")
 	}()
 	statsHandle := do.StatsHandle()
 	for {
 		select {
-		case <-gcTicker.C:
+		case <-gcTickerCh:
 			// Only the owner should perform this operation.
 			if do.statsOwner.IsOwner() {
 				updateTime := time.Now().AddDate(0, 0, -daysToKeep)

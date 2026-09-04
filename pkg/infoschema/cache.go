@@ -20,6 +20,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/pingcap/tidb/pkg/config/diagnosticmode"
 	infoschema_metrics "github.com/pingcap/tidb/pkg/infoschema/metrics"
 	tidbkv "github.com/pingcap/tidb/pkg/kv"
 	"github.com/pingcap/tidb/pkg/meta"
@@ -312,7 +313,7 @@ func (h *InfoCache) Insert(is InfoSchema, schemaTS uint64) bool {
 	if h.lastCheckVersion == 0 {
 		h.lastCheckVersion = version
 		h.lastCheckTime = time.Now()
-	} else if version > h.lastCheckVersion+gcCheckInterval && time.Since(h.lastCheckTime) > time.Minute {
+	} else if shouldStartInfoSchemaGC(version, h.lastCheckVersion, h.lastCheckTime) {
 		h.lastCheckVersion = version
 		h.lastCheckTime = time.Now()
 		go h.gcOldVersion()
@@ -366,6 +367,12 @@ func (h *InfoCache) Insert(is InfoSchema, schemaTS uint64) bool {
 	}
 
 	return true
+}
+
+func shouldStartInfoSchemaGC(version, lastCheckVersion int64, lastCheckTime time.Time) bool {
+	return !diagnosticmode.Enabled() &&
+		version > lastCheckVersion+gcCheckInterval &&
+		time.Since(lastCheckTime) > time.Minute
 }
 
 // InsertEmptySchemaVersion inserts empty schema version into a map. If exceeded the cache capacity, remove the oldest version.

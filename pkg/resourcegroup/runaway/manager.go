@@ -23,6 +23,7 @@ import (
 	"github.com/jellydator/ttlcache/v3"
 	"github.com/pingcap/failpoint"
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
+	"github.com/pingcap/tidb/pkg/config/diagnosticmode"
 	"github.com/pingcap/tidb/pkg/ddl"
 	"github.com/pingcap/tidb/pkg/infoschema"
 	"github.com/pingcap/tidb/pkg/metrics"
@@ -191,7 +192,10 @@ func (rm *Manager) RunawayRecordFlushLoop() {
 		rm.sysSessionPool,
 	)
 
-	runawayRecordGCTicker := time.NewTicker(gcInterval)
+	runawayRecordGCTicker, runawayRecordGCTickerCh := newRunawayRecordGCTicker(gcInterval)
+	if runawayRecordGCTicker != nil {
+		defer runawayRecordGCTicker.Stop()
+	}
 	recordCh := rm.runawayRecordChan()
 	quarantineRecordCh := rm.quarantineRecordChan()
 	staleQuarantineRecordCh := rm.staleQuarantineRecordChan()
@@ -214,7 +218,7 @@ func (rm *Manager) RunawayRecordFlushLoop() {
 				Match:             r.Match,
 			}
 			runawayRecordFlusher.add(key, r)
-		case <-runawayRecordGCTicker.C: // delete expired runaway records periodically
+		case <-runawayRecordGCTickerCh: // delete expired runaway records periodically
 			go rm.deleteExpiredRows(runawayRecordExpiredDuration)
 		case <-quarantineRecordFlusher.tickerCh(): // flush quarantine records periodically
 			quarantineRecordFlusher.flush()
@@ -229,6 +233,14 @@ func (rm *Manager) RunawayRecordFlushLoop() {
 			staleQuarantineFlusher.add(r.ID, r)
 		}
 	}
+}
+
+func newRunawayRecordGCTicker(interval time.Duration) (*time.Ticker, <-chan time.Time) {
+	if diagnosticmode.Enabled() {
+		return nil, nil
+	}
+	ticker := time.NewTicker(interval)
+	return ticker, ticker.C
 }
 
 // RunawayWatchSyncLoop is used to sync runaway watch records.

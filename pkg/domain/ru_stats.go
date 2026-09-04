@@ -89,9 +89,11 @@ func (do *Domain) requestUnitsWriterLoop() {
 				}
 				time.Sleep(time.Second)
 			}
-			// try gc outdated rows
-			if err := ruWriter.GCOutdatedRecords(lastTime); err != nil {
-				logutil.BgLogger().Warn("[ru_stats] gc outdated rowd failed, will try next time.", zap.Error(err))
+			if shouldRunBackgroundGC() {
+				// try gc outdated rows
+				if err := ruWriter.GCOutdatedRecords(lastTime); err != nil {
+					logutil.BgLogger().Warn("[ru_stats] gc outdated rowd failed, will try next time.", zap.Error(err))
+				}
 			}
 
 			logutil.BgLogger().Info("[ru_stats] finish write ru historical data", zap.String("end_time", lastTime.Format(time.DateTime)),

@@ -15,6 +15,7 @@ go_library(
     importpath = "github.com/pingcap/tidb/pkg/dxf/framework/scheduler",
     visibility = ["//visibility:public"],
     deps = [
+        "//pkg/config/diagnosticmode",
         "//pkg/config/kerneltype",
         "//pkg/domain/infosync",
         "//pkg/domain/serverinfo",
@@ -67,9 +68,10 @@ go_test(
     embed = [":scheduler"],
     flaky = True,
     race = "off",
-    shard_count = 46,
+    shard_count = 47,
     deps = [
         "//pkg/config",
+        "//pkg/config/diagnosticmode",
         "//pkg/config/kerneltype",
         "//pkg/domain/infosync",
         "//pkg/domain/sqlsvrapi",

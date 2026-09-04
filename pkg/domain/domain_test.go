@@ -295,6 +295,16 @@ func TestShouldStartLogBackupAdvancer(t *testing.T) {
 	})
 }
 
+func TestShouldRunBackgroundGC(t *testing.T) {
+	t.Cleanup(diagnosticmode.SetForTest(false))
+	require.True(t, shouldRunBackgroundGC())
+
+	t.Run("diagnostic mode", func(t *testing.T) {
+		t.Cleanup(diagnosticmode.SetForTest(true))
+		require.False(t, shouldRunBackgroundGC())
+	})
+}
+
 func TestShouldStartTTLJobManagerWithExternalWorkloadRole(t *testing.T) {
 	t.Cleanup(config.RestoreFunc())
 	t.Cleanup(diagnosticmode.SetForTest(false))
