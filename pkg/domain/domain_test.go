@@ -280,6 +280,21 @@ func TestUpdateExternalWorkloadTTLJobEnableOnlyFromMaster(t *testing.T) {
 	require.Nil(t, ttlWorker.updatedValue)
 }
 
+func TestShouldStartLogBackupAdvancer(t *testing.T) {
+	t.Cleanup(diagnosticmode.SetForTest(false))
+	require.True(t, shouldStartLogBackupAdvancer())
+
+	t.Run("diagnostic mode", func(t *testing.T) {
+		t.Cleanup(diagnosticmode.SetForTest(true))
+		require.False(t, shouldStartLogBackupAdvancer())
+
+		dom := NewMockDomain()
+		require.NoError(t, dom.initLogBackup(context.Background(), nil))
+		require.Nil(t, dom.brOwnerMgr)
+		require.Nil(t, dom.logBackupAdvancer)
+	})
+}
+
 func TestShouldStartTTLJobManagerWithExternalWorkloadRole(t *testing.T) {
 	t.Cleanup(config.RestoreFunc())
 	t.Cleanup(diagnosticmode.SetForTest(false))

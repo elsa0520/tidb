@@ -964,7 +964,16 @@ func (do *Domain) ExternalWorkloadManager() extworkload.Manager {
 	return do.extWorkloadMgr
 }
 
+func shouldStartLogBackupAdvancer() bool {
+	return !diagnosticmode.Enabled()
+}
+
 func (do *Domain) initLogBackup(ctx context.Context, pdClient pd.Client) error {
+	if !shouldStartLogBackupAdvancer() {
+		log.Info("don't run log backup advancer", zap.String("reason", "diagnostic mode"))
+		return nil
+	}
+
 	cfg := config.GetGlobalConfig()
 	if pdClient == nil || do.etcdClient == nil {
 		log.Warn("pd / etcd client not provided, won't begin Advancer.")
