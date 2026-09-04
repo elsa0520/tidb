@@ -30,6 +30,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/tidb/pkg/config"
+	"github.com/pingcap/tidb/pkg/config/diagnosticmode"
 	"github.com/pingcap/tidb/pkg/ddl"
 	"github.com/pingcap/tidb/pkg/domain/infosync"
 	"github.com/pingcap/tidb/pkg/domain/serverinfo"
@@ -281,6 +282,16 @@ func TestUpdateExternalWorkloadTTLJobEnableOnlyFromMaster(t *testing.T) {
 
 func TestShouldStartTTLJobManagerWithExternalWorkloadRole(t *testing.T) {
 	t.Cleanup(config.RestoreFunc())
+	t.Cleanup(diagnosticmode.SetForTest(false))
+
+	t.Run("diagnostic mode", func(t *testing.T) {
+		t.Cleanup(diagnosticmode.SetForTest(true))
+		diagnosticDom := NewMockDomain()
+		require.False(t, diagnosticDom.shouldStartTTLJobManager())
+		diagnosticDom.StartTTLJobManager()
+		require.Nil(t, diagnosticDom.TTLJobManager())
+	})
+
 	dom := NewMockDomain()
 	require.True(t, dom.shouldStartTTLJobManager())
 

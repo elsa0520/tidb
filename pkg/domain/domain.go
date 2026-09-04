@@ -40,6 +40,7 @@ import (
 	"github.com/pingcap/tidb/br/pkg/streamhelper/daemon"
 	"github.com/pingcap/tidb/pkg/bindinfo"
 	"github.com/pingcap/tidb/pkg/config"
+	"github.com/pingcap/tidb/pkg/config/diagnosticmode"
 	"github.com/pingcap/tidb/pkg/ddl"
 	"github.com/pingcap/tidb/pkg/ddl/notifier"
 	"github.com/pingcap/tidb/pkg/ddl/placement"
@@ -2904,7 +2905,10 @@ func (do *Domain) serverIDKeeper() {
 func (do *Domain) StartTTLJobManager() {
 	role, configured := do.ttlExternalWorkloadRole()
 	if !do.shouldStartTTLJobManager() {
-		fields := make([]zap.Field, 0, 1)
+		fields := make([]zap.Field, 0, 2)
+		if diagnosticmode.Enabled() {
+			fields = append(fields, zap.String("reason", "diagnostic mode"))
+		}
 		if configured {
 			fields = append(fields, zap.String("role", string(role)))
 		}
@@ -2931,6 +2935,10 @@ func (do *Domain) ttlExternalWorkloadRole() (config.ExternalWorkloadRole, bool) 
 }
 
 func (do *Domain) shouldStartTTLJobManager() bool {
+	if diagnosticmode.Enabled() {
+		return false
+	}
+
 	// Once external workload is configured, TTL jobs must run only on the
 	// dedicated TTL task worker with a live controller manager. Falling back to
 	// local TTL scheduling when controller coordination is unavailable can cause

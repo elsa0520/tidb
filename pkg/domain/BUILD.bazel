@@ -28,6 +28,7 @@ go_library(
         "//pkg/bindinfo",
         "//pkg/config",
         "//pkg/config/deploymode",
+        "//pkg/config/diagnosticmode",
         "//pkg/ddl",
         "//pkg/ddl/notifier",
         "//pkg/ddl/placement",
@@ -165,6 +166,7 @@ go_test(
     deps = [
         "//pkg/config",
         "//pkg/config/deploymode",
+        "//pkg/config/diagnosticmode",
         "//pkg/config/kerneltype",
         "//pkg/ddl",
         "//pkg/domain/infosync",
