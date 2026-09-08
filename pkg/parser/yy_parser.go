@@ -80,9 +80,6 @@ type ParserConfig struct {
 	EnableWindowFunction        bool
 	EnableStrictDoubleTypeCheck bool
 	SkipPositionRecording       bool
-	// EnableUnsupportedMySQLSyntax enables parser acceptance of selected MySQL syntax unsupported by TiDB.
-	// It is intended for tools and does not imply planner or executor support.
-	EnableUnsupportedMySQLSyntax bool
 }
 
 const (
@@ -104,10 +101,9 @@ type Parser struct {
 	lexer      Scanner
 	hintParser *hintParser
 
-	explicitCharset              bool
-	strictDoubleFieldType        bool
-	enableMariaDB                bool
-	enableUnsupportedMySQLSyntax bool
+	explicitCharset       bool
+	strictDoubleFieldType bool
+	enableMariaDB         bool
 
 	// the following fields are used by yyParse to reduce allocation.
 	cache  []yySymType
@@ -165,7 +161,6 @@ func (parser *Parser) Reset() {
 func (parser *Parser) reset() {
 	parser.explicitCharset = false
 	parser.strictDoubleFieldType = false
-	parser.enableUnsupportedMySQLSyntax = false
 	parser.EnableWindowFunc(true)
 	parser.SetStrictDoubleTypeCheck(true)
 	mode, _ := mysql.GetSQLMode(mysql.DefaultSQLMode)
@@ -187,7 +182,6 @@ func (parser *Parser) SetParserConfig(config ParserConfig) {
 	parser.EnableWindowFunc(config.EnableWindowFunction)
 	parser.SetStrictDoubleTypeCheck(config.EnableStrictDoubleTypeCheck)
 	parser.lexer.skipPositionRecording = config.SkipPositionRecording
-	parser.enableUnsupportedMySQLSyntax = config.EnableUnsupportedMySQLSyntax
 }
 
 // ParseSQL parses a query string to raw ast.StmtNode.

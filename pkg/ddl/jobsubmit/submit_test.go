@@ -68,8 +68,7 @@ func (*fakeServerStateSyncer) WatchChan() clientv3.WatchChan { return nil }
 func (*fakeServerStateSyncer) Rewatch(context.Context) {}
 
 func newSubmitTestEnv(t *testing.T) submitTestEnv {
-	store, dom := testkit.CreateMockStoreAndDomain(t, mockstore.WithStoreType(mockstore.EmbedUnistore))
-	dom.DDL().OwnerManager().CampaignCancel()
+	store := testkit.CreateMockStore(t, mockstore.WithStoreType(mockstore.EmbedUnistore))
 	tk := testkit.NewTestKit(t, store)
 
 	pool := pools.NewResourcePool(func() (pools.Resource, error) {

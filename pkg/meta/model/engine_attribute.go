@@ -67,7 +67,7 @@ type StorageClassSettings struct {
 type StorageClassTransitRule struct {
 	Tier         string `json:"tier"`
 	AfterDays    uint   `json:"after_days"`
-	AfterSeconds uint   `json:"after_seconds"`
+	AfterSeconds uint   `json:"after_seconds,omitempty"`
 }
 
 // TotalSeconds returns the total seconds after which the transition happens.

@@ -100,18 +100,16 @@ func (l *ownerListener) OnBecomeOwner() {
 	ctx, cancelFunc := context.WithCancelCause(l.ddl.ddlCtx.ctx)
 	sysTblMgr := systable.NewManager(l.ddl.sessPool)
 	l.scheduler = &jobScheduler{
-		schCtx:                        ctx,
-		cancel:                        cancelFunc,
-		runningJobs:                   newRunningJobs(),
-		sysTblMgr:                     sysTblMgr,
-		schemaLoader:                  l.ddl.schemaLoader,
-		minJobIDRefresher:             l.ddl.minJobIDRefresher,
-		unSyncedTracker:               newUnSyncedJobTracker(),
-		schemaVerMgr:                  newSchemaVersionManager(l.ddl.store),
-		schemaVerSyncer:               l.ddl.schemaVerSyncer,
-		eventPublishStore:             l.ddl.eventPublishStore,
-		storageClassTransitionManager: l.ddl.storageClassTransitionManager,
-		storageClassTransitionReadyCh: make(chan struct{}),
+		schCtx:            ctx,
+		cancel:            cancelFunc,
+		runningJobs:       newRunningJobs(),
+		sysTblMgr:         sysTblMgr,
+		schemaLoader:      l.ddl.schemaLoader,
+		minJobIDRefresher: l.ddl.minJobIDRefresher,
+		unSyncedTracker:   newUnSyncedJobTracker(),
+		schemaVerMgr:      newSchemaVersionManager(l.ddl.store),
+		schemaVerSyncer:   l.ddl.schemaVerSyncer,
+		eventPublishStore: l.ddl.eventPublishStore,
 
 		ddlCtx:         l.ddl.ddlCtx,
 		ddlJobNotifyCh: l.jobSubmitter.ddlJobNotifyCh,
@@ -146,10 +144,6 @@ type jobScheduler struct {
 	schemaVerMgr      *schemaVersionManager
 	schemaVerSyncer   schemaver.Syncer
 	eventPublishStore notifier.Store
-
-	storageClassTransitionManager *storageClassTransitionManager
-	storageClassTransitionReady   atomic.Bool
-	storageClassTransitionReadyCh chan struct{}
 
 	// those fields are created or initialized on start
 	reorgWorkerPool      *workerPool
@@ -194,15 +188,6 @@ func (s *jobScheduler) start() {
 	s.wg.RunWithLog(func() {
 		s.schemaVerSyncer.SyncJobSchemaVerLoop(s.schCtx)
 	})
-	if kerneltype.IsNextGen() && s.storageClassTransitionManager != nil {
-		s.wg.RunWithLog(func() {
-			select {
-			case <-s.storageClassTransitionReadyCh:
-				s.storageClassTransitionManager.run(s.schCtx, s.sessPool)
-			case <-s.schCtx.Done():
-			}
-		})
-	}
 }
 
 func (s *jobScheduler) close() {
@@ -313,9 +298,6 @@ func (s *jobScheduler) schedule() error {
 	ticker := time.NewTicker(dispatchLoopWaitingDuration)
 	defer ticker.Stop()
 	s.mustReloadSchemas()
-	if s.schCtx.Err() != nil {
-		return s.schCtx.Err()
-	}
 
 	trace := traceevent.NewTrace()
 	ctx := tracing.WithFlightRecorder(s.schCtx, trace)
@@ -479,13 +461,6 @@ func (s *jobScheduler) mustReloadSchemas() {
 	for {
 		err := s.schemaLoader.Reload()
 		if err == nil {
-			if s.schCtx.Err() != nil {
-				return
-			}
-			// Missing physical IDs become destructive SUPERSEDED decisions in
-			// the transition poller, so publish readiness only after this owner
-			// has loaded the current schema snapshot.
-			s.markStorageClassTransitionReady()
 			return
 		}
 		logutil.DDLLogger().Warn("reload schema failed, will retry later", zap.Error(err))
@@ -494,12 +469,6 @@ func (s *jobScheduler) mustReloadSchemas() {
 			return
 		case <-time.After(schedulerLoopRetryInterval):
 		}
-	}
-}
-
-func (s *jobScheduler) markStorageClassTransitionReady() {
-	if s.storageClassTransitionReadyCh != nil && s.storageClassTransitionReady.CompareAndSwap(false, true) {
-		close(s.storageClassTransitionReadyCh)
 	}
 }
 

@@ -63,100 +63,103 @@ func withSession(pool syssession.Pool, fn func(session.Session) error) error {
 			if err != nil {
 				return err
 			}
-			defer terror.Call(restore)
+			defer restore()
 			return fn(se)
 		})
 	})
 }
 
-func prepareSession(se session.Session) (func() error, error) {
+func prepareSession(se session.Session) (func(), error) {
 	originalRetryLimit := se.GetSessionVars().RetryLimit
 	originalEnable1PC := se.GetSessionVars().Enable1PC
 	originalEnableAsyncCommit := se.GetSessionVars().EnableAsyncCommit
 	originalTimeZone, restoreTimeZone := "", false
 	originalIsolationReadEngines, restoreIsolationReadEngines := "", false
-	restoreRetryLimit, restoreEnable1PC, restoreEnableAsyncCommit := false, false, false
 
-	restore := func() error {
-		var restoreErr error
-		restoreVar := func(name, sql string, args ...any) {
-			_, err := se.ExecuteSQL(context.Background(), sql, args...)
-			if err == nil {
+	restore := func() {
+		_, err := se.ExecuteSQL(context.Background(), fmt.Sprintf("set tidb_retry_limit=%d", originalRetryLimit))
+		if err != nil {
+			logutil.BgLogger().Warn("fail to reset tidb_retry_limit", zap.Int64("originalRetryLimit", originalRetryLimit), zap.Error(err))
+			se.AvoidReuse()
+			return
+		}
+
+		if !originalEnable1PC {
+			_, err = se.ExecuteSQL(context.Background(), "set tidb_enable_1pc=OFF")
+			terror.Log(err)
+			if err != nil {
+				se.AvoidReuse()
 				return
 			}
-			logutil.BgLogger().Warn("fail to restore TTL session variable", zap.String("variable", name), zap.Error(err))
-			restoreErr = multierr.Append(restoreErr, errors.Wrapf(err, "restore %s", name))
 		}
-		if restoreRetryLimit {
-			restoreVar("tidb_retry_limit", fmt.Sprintf("set tidb_retry_limit=%d", originalRetryLimit))
+
+		if !originalEnableAsyncCommit {
+			_, err = se.ExecuteSQL(context.Background(), "set tidb_enable_async_commit=OFF")
+			terror.Log(err)
+			if err != nil {
+				se.AvoidReuse()
+				return
+			}
 		}
-		if restoreEnable1PC && !originalEnable1PC {
-			restoreVar("tidb_enable_1pc", "set tidb_enable_1pc=OFF")
-		}
-		if restoreEnableAsyncCommit && !originalEnableAsyncCommit {
-			restoreVar("tidb_enable_async_commit", "set tidb_enable_async_commit=OFF")
-		}
+
 		if restoreTimeZone {
-			restoreVar("time_zone", "set @@time_zone=%?", originalTimeZone)
+			_, err = se.ExecuteSQL(context.Background(), "set @@time_zone=%?", originalTimeZone)
+			terror.Log(err)
+			if err != nil {
+				se.AvoidReuse()
+				return
+			}
 		}
+
 		if restoreIsolationReadEngines {
-			restoreVar("tidb_isolation_read_engines", "set tidb_isolation_read_engines=%?", originalIsolationReadEngines)
+			_, err = se.ExecuteSQL(context.Background(), "set tidb_isolation_read_engines=%?", originalIsolationReadEngines)
+			terror.Log(err)
+			if err != nil {
+				se.AvoidReuse()
+				return
+			}
 		}
-		if restoreErr != nil {
-			se.AvoidReuse()
-		}
-		return restoreErr
-	}
-	cleanupOnError := func(setupErr error) (func() error, error) {
-		restoreErr := restore()
-		// A SET statement may have taken effect even when its execution returned
-		// an error. Never put a partially prepared session back into the pool.
-		se.AvoidReuse()
-		return nil, multierr.Append(setupErr, restoreErr)
 	}
 
 	// store and set the retry limit to 0
-	restoreRetryLimit = true
 	_, err := se.ExecuteSQL(context.Background(), "set tidb_retry_limit=0")
 	if err != nil {
-		return cleanupOnError(err)
+		return nil, err
 	}
 
 	// set enable 1pc to ON
-	restoreEnable1PC = true
 	_, err = se.ExecuteSQL(context.Background(), "set tidb_enable_1pc=ON")
 	if err != nil {
-		return cleanupOnError(err)
+		return nil, err
 	}
 
 	// set enable async commit to ON
-	restoreEnableAsyncCommit = true
 	_, err = se.ExecuteSQL(context.Background(), "set tidb_enable_async_commit=ON")
 	if err != nil {
-		return cleanupOnError(err)
+		return nil, err
 	}
 
 	// Force rollback the session to guarantee the session is not in any explicit transaction
 	if _, err = se.ExecuteSQL(context.Background(), "ROLLBACK"); err != nil {
-		return cleanupOnError(err)
+		return nil, err
 	}
 
 	// set the time zone to UTC
 	rows, err := se.ExecuteSQL(context.Background(), "select @@time_zone")
 	if err != nil {
-		return cleanupOnError(err)
+		return nil, err
 	}
 
 	if len(rows) == 0 || rows[0].Len() == 0 {
-		return cleanupOnError(errors.New("failed to get time_zone variable"))
+		return nil, errors.New("failed to get time_zone variable")
 	}
 	originalTimeZone = rows[0].GetString(0)
 
-	restoreTimeZone = true
 	_, err = se.ExecuteSQL(context.Background(), "set @@time_zone='UTC'")
 	if err != nil {
-		return cleanupOnError(err)
+		return nil, err
 	}
+	restoreTimeZone = true
 
 	// allow the session in TTL to use all read engines.
 	_, hasTiDBEngine := se.GetSessionVars().IsolationReadEngines[kv.TiDB]
@@ -165,19 +168,20 @@ func prepareSession(se session.Session) (func() error, error) {
 	if !hasTiDBEngine || !hasTiKVEngine || !hasTiFlashEngine {
 		rows, err := se.ExecuteSQL(context.Background(), "select @@tidb_isolation_read_engines")
 		if err != nil {
-			return cleanupOnError(err)
+			return nil, err
 		}
 
 		if len(rows) == 0 || rows[0].Len() == 0 {
-			return cleanupOnError(errors.New("failed to get tidb_isolation_read_engines variable"))
+			return nil, errors.New("failed to get tidb_isolation_read_engines variable")
 		}
 		originalIsolationReadEngines = rows[0].GetString(0)
 
-		restoreIsolationReadEngines = true
 		_, err = se.ExecuteSQL(context.Background(), "set tidb_isolation_read_engines='tikv,tiflash,tidb'")
 		if err != nil {
-			return cleanupOnError(err)
+			return nil, err
 		}
+
+		restoreIsolationReadEngines = true
 	}
 
 	return restore, nil
@@ -195,10 +199,9 @@ func newTableSession(se session.Session, tbl *cache.PhysicalTable, expire time.T
 func NewScanSession(ctx context.Context, se session.Session, tbl *cache.PhysicalTable, expire time.Time) (*ttlTableSession, func() error, error) {
 	origConcurrency := se.GetSessionVars().DistSQLScanConcurrency()
 	origPaging := se.GetSessionVars().EnablePaging
-	origInternalSQLScanUserTable := se.GetSessionVars().InternalSQLScanUserTable
 	se.GetSessionVars().InternalSQLScanUserTable = true
 	restore := func() error {
-		se.GetSessionVars().InternalSQLScanUserTable = origInternalSQLScanUserTable
+		se.GetSessionVars().InternalSQLScanUserTable = false
 		_, err := se.ExecuteSQL(context.Background(), "set @@tidb_distsql_scan_concurrency=%?", origConcurrency)
 		terror.Log(err)
 		if err != nil {
@@ -217,9 +220,6 @@ func NewScanSession(ctx context.Context, se session.Session, tbl *cache.Physical
 	// Set the distsql scan concurrency to 1 to reduce the number of cop tasks in TTL scan.
 	if _, err := se.ExecuteSQL(ctx, "set @@tidb_distsql_scan_concurrency=1"); err != nil {
 		terror.Log(restore())
-		// The SET may have taken effect before returning an error. Even if the
-		// best-effort restore succeeds, do not return this session to the pool.
-		se.AvoidReuse()
 		return nil, nil, err
 	}
 
@@ -229,7 +229,6 @@ func NewScanSession(ctx context.Context, se session.Session, tbl *cache.Physical
 	// Disable it to make the scan more efficient.
 	if _, err := se.ExecuteSQL(ctx, "set @@tidb_enable_paging=OFF"); err != nil {
 		terror.Log(restore())
-		se.AvoidReuse()
 		return nil, nil, err
 	}
 
@@ -249,6 +248,10 @@ func (s *ttlTableSession) ExecuteSQLWithCheck(ctx context.Context, sql string) (
 	tracer.EnterPhase(metrics.PhaseOther)
 	if !vardef.EnableTTLJob.Load() {
 		return nil, false, errors.New("global TTL job is disabled")
+	}
+
+	if err := s.ResetWithGlobalTimeZone(ctx); err != nil {
+		return nil, false, err
 	}
 
 	var result []chunk.Row

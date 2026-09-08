@@ -3234,7 +3234,6 @@ const (
 	ShowDistributions
 	ShowDistributionJobs
 	ShowAffinity
-	ShowStorageClassTransitions
 	// showTpCount is the count of all kinds of `SHOW` statements.
 	showTpCount
 )
@@ -3661,8 +3660,6 @@ func (n *ShowStmt) Restore(ctx *format.RestoreCtx) error {
 			ctx.WriteKeyWord("SESSION_STATES")
 		case ShowReplicaStatus:
 			ctx.WriteKeyWord("REPLICA STATUS")
-		case ShowStorageClassTransitions:
-			ctx.WriteKeyWord("STORAGE_CLASS TRANSITIONS")
 		default:
 			return errors.New("Unknown ShowStmt type")
 		}
