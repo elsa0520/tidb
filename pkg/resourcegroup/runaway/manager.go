@@ -64,6 +64,9 @@ type Manager struct {
 	// action "judging whether there is this record in the current watch list and adding records" have atomicity.
 	queryLock sync.Mutex
 	watchList *ttlcache.Cache[string, *QuarantineRecord]
+	// watchListStarted records whether the automatic expiration loop was started.
+	// Stop blocks if it is called on a cache whose expiration loop was never started.
+	watchListStarted bool
 	// activeGroup is used to manage the active runaway watches of resource group.
 	// It uses sync.Map + atomic.Int64 for lock-free reads on the per-query hot path.
 	activeGroup sync.Map // map[string]*atomic.Int64
@@ -106,10 +109,14 @@ func NewRunawayManager(
 		ttlcache.WithCapacity[string, *QuarantineRecord](maxWatchListCap),
 		ttlcache.WithDisableTouchOnHit[string, *QuarantineRecord](),
 	)
-	go watchList.Start()
+	watchListStarted := !diagnosticmode.Enabled()
+	if watchListStarted {
+		go watchList.Start()
+	}
 	m := &Manager{
 		ResourceGroupCtl:      resourceGroupCtl,
 		watchList:             watchList,
+		watchListStarted:      watchListStarted,
 		serverID:              serverAddr,
 		runawayQueriesChan:    make(chan *Record, maxWatchRecordChannelSize),
 		quarantineChan:        make(chan *QuarantineRecord, maxWatchRecordChannelSize),
@@ -120,20 +127,24 @@ func NewRunawayManager(
 		infoCache:             infoCache,
 		ddl:                   ddl,
 	}
-	m.insertionCancel = watchList.OnInsertion(func(_ context.Context, i *ttlcache.Item[string, *QuarantineRecord]) {
-		name := i.Value().ResourceGroupName
-		counter, _ := m.loadOrStoreActiveCounter(name)
-		counter.Add(1)
-	})
-	m.evictionCancel = watchList.OnEviction(func(_ context.Context, _ ttlcache.EvictionReason, i *ttlcache.Item[string, *QuarantineRecord]) {
-		name := i.Value().ResourceGroupName
-		counter, _ := m.loadOrStoreActiveCounter(name)
-		counter.Add(-1)
-		if i.Value().ID == 0 {
-			return
-		}
-		m.staleQuarantineRecord <- i.Value()
-	})
+	// ttlcache runs callbacks in separate goroutines even if Start is not called.
+	// Diagnostic reads need the cache, but not query-checking counters or cleanup.
+	if watchListStarted {
+		m.insertionCancel = watchList.OnInsertion(func(_ context.Context, i *ttlcache.Item[string, *QuarantineRecord]) {
+			name := i.Value().ResourceGroupName
+			counter, _ := m.loadOrStoreActiveCounter(name)
+			counter.Add(1)
+		})
+		m.evictionCancel = watchList.OnEviction(func(_ context.Context, _ ttlcache.EvictionReason, i *ttlcache.Item[string, *QuarantineRecord]) {
+			name := i.Value().ResourceGroupName
+			counter, _ := m.loadOrStoreActiveCounter(name)
+			counter.Add(-1)
+			if i.Value().ID == 0 {
+				return
+			}
+			m.enqueueStaleWatch(i.Value())
+		})
+	}
 	m.runawaySyncer = newSyncer(pool, infoCache)
 
 	return m
@@ -312,7 +323,7 @@ func (rm *Manager) addWatchList(record *QuarantineRecord, ttl time.Duration, for
 			if rm.watchList.Get(key) == nil {
 				rm.watchList.Set(key, record, ttl)
 			} else {
-				rm.staleQuarantineRecord <- record
+				rm.enqueueStaleWatch(record)
 			}
 			rm.queryLock.Unlock()
 		} else if item.ID == 0 {
@@ -322,7 +333,7 @@ func (rm *Manager) addWatchList(record *QuarantineRecord, ttl time.Duration, for
 			rm.watchList.Set(key, record, ttl)
 		} else if item.ID != record.ID {
 			// check the ID because of the earlier scan.
-			rm.staleQuarantineRecord <- record
+			rm.enqueueStaleWatch(record)
 		}
 	}
 }
@@ -414,7 +425,7 @@ func (rm *Manager) Stop() {
 	if rm == nil {
 		return
 	}
-	if rm.watchList != nil {
+	if rm.watchList != nil && rm.watchListStarted {
 		rm.watchList.Stop()
 	}
 }
@@ -491,13 +502,22 @@ func (rm *Manager) doSync() error {
 	return nil
 }
 
+func (rm *Manager) enqueueStaleWatch(record *QuarantineRecord) {
+	// INFORMATION_SCHEMA reads can still load expired or duplicate watches in
+	// diagnostic mode, where the flush loop consuming this channel is disabled.
+	if diagnosticmode.Enabled() {
+		return
+	}
+	rm.staleQuarantineRecord <- record
+}
+
 // AddWatch is used to add watch items from system table.
 func (rm *Manager) AddWatch(record *QuarantineRecord) {
 	ttl := time.Until(record.EndTime)
 	if record.EndTime.Equal(NullTime) {
 		ttl = 0
 	} else if ttl <= 0 {
-		rm.staleQuarantineRecord <- record
+		rm.enqueueStaleWatch(record)
 		return
 	}
 

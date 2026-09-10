@@ -26,9 +26,15 @@ import (
 	pd "github.com/tikv/pd/client"
 	"github.com/tikv/pd/client/constants"
 	rmclient "github.com/tikv/pd/client/resource_group/controller"
+	"go.uber.org/zap"
 )
 
 func (do *Domain) initResourceGroupsController(ctx context.Context, pdClient pd.Client, uniqueID uint64) error {
+	if !shouldStartResourceControlBackgroundTasks() {
+		logutil.BgLogger().Info("don't run resource group controller", zap.String("reason", "diagnostic mode"))
+		tikv.UnsetResourceControlInterceptor()
+		return do.initRunawayManager(nil)
+	}
 	if pdClient == nil {
 		logutil.BgLogger().Warn("cannot setup up resource controller, not using tikv storage")
 		// return nil as unistore doesn't support it
@@ -44,6 +50,15 @@ func (do *Domain) initResourceGroupsController(ctx context.Context, pdClient pd.
 		return err
 	}
 	control.Start(ctx)
+	if err := do.initRunawayManager(control); err != nil {
+		return err
+	}
+	do.SetResourceGroupsController(control)
+	tikv.SetResourceControlInterceptor(control)
+	return nil
+}
+
+func (do *Domain) initRunawayManager(control *rmclient.ResourceGroupsController) error {
 	serverInfo, err := infosync.GetServerInfo()
 	if err != nil {
 		return err
@@ -51,7 +66,5 @@ func (do *Domain) initResourceGroupsController(ctx context.Context, pdClient pd.
 	serverAddr := net.JoinHostPort(serverInfo.IP, strconv.Itoa(int(serverInfo.Port)))
 	do.runawayManager = runaway.NewRunawayManager(control, serverAddr,
 		do.sysSessionPool, do.exit, do.infoCache, do.ddl)
-	do.SetResourceGroupsController(control)
-	tikv.SetResourceControlInterceptor(control)
 	return nil
 }

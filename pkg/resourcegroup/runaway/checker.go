@@ -90,6 +90,9 @@ func NewChecker(
 
 // DeriveChecker derives a RunawayChecker from the given resource group
 func (rm *Manager) DeriveChecker(resourceGroupName, originalSQL, sqlDigest, planDigest string, startTime time.Time) *Checker {
+	if rm == nil || rm.ResourceGroupCtl == nil {
+		return nil
+	}
 	group, err := rm.ResourceGroupCtl.GetResourceGroup(resourceGroupName)
 	if err != nil || group == nil {
 		logutil.BgLogger().Warn("cannot setup up runaway checker", zap.Error(err))

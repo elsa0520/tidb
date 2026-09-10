@@ -840,9 +840,13 @@ func (do *Domain) Start(startMode ddl.StartMode) error {
 		do.info.ServerInfoSyncer().ServerInfoSyncLoop(do.store, do.exit)
 	}, "infoSyncerKeeper")
 	do.wg.Run(do.globalConfigSyncerKeeper, "globalConfigSyncerKeeper")
-	do.wg.Run(do.runawayManager.RunawayRecordFlushLoop, "runawayRecordFlushLoop")
-	do.wg.Run(do.runawayManager.RunawayWatchSyncLoop, "runawayWatchSyncLoop")
-	do.wg.Run(do.requestUnitsWriterLoop, "requestUnitsWriterLoop")
+	if shouldStartResourceControlBackgroundTasks() {
+		do.wg.Run(do.runawayManager.RunawayRecordFlushLoop, "runawayRecordFlushLoop")
+		do.wg.Run(do.runawayManager.RunawayWatchSyncLoop, "runawayWatchSyncLoop")
+		do.wg.Run(do.requestUnitsWriterLoop, "requestUnitsWriterLoop")
+	} else {
+		logutil.BgLogger().Info("don't run resource control background tasks", zap.String("reason", "diagnostic mode"))
+	}
 	skipRegisterToDashboard := gCfg.SkipRegisterToDashboard
 	if !skipRegisterToDashboard {
 		do.wg.Run(func() {
@@ -973,6 +977,10 @@ func shouldStartLogBackupAdvancer() bool {
 }
 
 func shouldRunBackgroundGC() bool {
+	return !diagnosticmode.Enabled()
+}
+
+func shouldStartResourceControlBackgroundTasks() bool {
 	return !diagnosticmode.Enabled()
 }
 

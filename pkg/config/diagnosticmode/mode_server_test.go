@@ -110,6 +110,31 @@ func TestDumpTiDBServerGoroutinesInDiagnosticMode(t *testing.T) {
 				"github.com/pingcap/tidb/pkg/resourcegroup/runaway.(*Manager).deleteExpiredRows",
 			},
 		},
+		{
+			taskName: "Resource Control",
+			goroutines: []string{
+				"github.com/jellydator/ttlcache/v3.(*Cache[...]).Start",
+				"github.com/pingcap/tidb/pkg/resourcegroup/runaway.(*Manager).RunawayWatchSyncLoop",
+			},
+		},
+		{
+			taskName: "PD resource-group controller",
+			goroutines: []string{
+				"github.com/tikv/pd/client/resource_group/controller.(*ResourceGroupsController).Start.func1",
+			},
+		},
+		{
+			taskName: "Runaway flush",
+			goroutines: []string{
+				"github.com/pingcap/tidb/pkg/resourcegroup/runaway.(*Manager).RunawayRecordFlushLoop",
+			},
+		},
+		{
+			taskName: "RU writer",
+			goroutines: []string{
+				"github.com/pingcap/tidb/pkg/domain.(*Domain).requestUnitsWriterLoop",
+			},
+		},
 	}
 	for _, backgroundGoroutine := range backgroundGoroutines {
 		for _, goroutine := range backgroundGoroutine.goroutines {

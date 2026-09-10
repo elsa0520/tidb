@@ -137,6 +137,9 @@ func fromQueryWatchOptionList(ctx context.Context, sctx, newSctx sessionctx.Cont
 //  1. If no resource group is set, the default resource group is used
 //  2. If no action is specified, the action of the resource group is used. If no, an error message displayed.
 func validateWatchRecord(record *runaway.QuarantineRecord, client *rmclient.ResourceGroupsController) error {
+	if client == nil {
+		return errors.New("resource group controller is not initialized")
+	}
 	if len(record.ResourceGroupName) == 0 {
 		record.ResourceGroupName = resourcegroup.DefaultResourceGroupName
 	}

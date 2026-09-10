@@ -19,10 +19,17 @@ import (
 
 	"github.com/pingcap/tidb/pkg/config"
 	"github.com/pingcap/tidb/pkg/meta/autoid"
+	"github.com/pingcap/tidb/pkg/resourcegroup/runaway"
 	"github.com/pingcap/tidb/pkg/testkit/testsetup"
+	"github.com/stretchr/testify/require"
 	"github.com/tikv/client-go/v2/tikv"
 	"go.uber.org/goleak"
 )
+
+func TestValidateWatchRecordWithoutResourceGroupController(t *testing.T) {
+	err := validateWatchRecord(&runaway.QuarantineRecord{}, nil)
+	require.ErrorContains(t, err, "resource group controller is not initialized")
+}
 
 func TestMain(m *testing.M) {
 	testsetup.SetupForCommonTest()

@@ -373,6 +373,33 @@ func TestShouldRunBackgroundGC(t *testing.T) {
 	})
 }
 
+func TestShouldStartResourceControlBackgroundTasks(t *testing.T) {
+	t.Cleanup(diagnosticmode.SetForTest(false))
+	require.True(t, shouldStartResourceControlBackgroundTasks())
+
+	t.Cleanup(diagnosticmode.SetForTest(true))
+	require.False(t, shouldStartResourceControlBackgroundTasks())
+
+	serverInfoJSON, err := json.Marshal(&serverinfo.ServerInfo{
+		StaticInfo: serverinfo.StaticInfo{IP: "127.0.0.1", Port: 4000},
+	})
+	require.NoError(t, err)
+	require.NoError(t, failpoint.Enable(
+		"github.com/pingcap/tidb/pkg/domain/infosync/mockGetServerInfo",
+		fmt.Sprintf("return(`%s`)", serverInfoJSON),
+	))
+	t.Cleanup(func() {
+		require.NoError(t, failpoint.Disable("github.com/pingcap/tidb/pkg/domain/infosync/mockGetServerInfo"))
+	})
+
+	diagnosticDom := NewMockDomain()
+	diagnosticDom.exit = make(chan struct{})
+	require.NoError(t, diagnosticDom.initResourceGroupsController(context.Background(), nil, 1))
+	require.Nil(t, diagnosticDom.ResourceGroupsController())
+	require.NotNil(t, diagnosticDom.RunawayManager())
+	diagnosticDom.RunawayManager().Stop()
+}
+
 func TestShouldStartTTLJobManagerWithExternalWorkloadRole(t *testing.T) {
 	t.Cleanup(config.RestoreFunc())
 	t.Cleanup(diagnosticmode.SetForTest(false))

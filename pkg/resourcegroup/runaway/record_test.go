@@ -46,6 +46,61 @@ func TestNewRunawayRecordGCTicker(t *testing.T) {
 	})
 }
 
+func TestNewRunawayManagerInDiagnosticMode(t *testing.T) {
+	t.Cleanup(diagnosticmode.SetForTest(true))
+	manager := NewRunawayManager(nil, "127.0.0.1:4000", nil, make(chan struct{}), nil, nil)
+	require.False(t, manager.watchListStarted)
+	require.Nil(t, manager.DeriveChecker("default", "select 1", "sql-digest", "plan-digest", time.Now()))
+	manager.Stop()
+
+	t.Run("expired watches do not enqueue cleanup", func(t *testing.T) {
+		manager := NewRunawayManager(nil, "test", nil, make(chan struct{}), nil, nil)
+		t.Cleanup(manager.Stop)
+		for i := range maxWatchRecordChannelSize + 1 {
+			manager.AddWatch(&QuarantineRecord{ID: int64(i + 1), EndTime: time.Now().Add(-time.Hour)})
+			// Check each send so a regression fails before the queue fills and blocks.
+			require.Empty(t, manager.staleQuarantineRecord)
+		}
+		require.Empty(t, manager.GetWatchList())
+	})
+
+	t.Run("duplicate watches do not enqueue cleanup", func(t *testing.T) {
+		manager := NewRunawayManager(nil, "test", nil, make(chan struct{}), nil, nil)
+		t.Cleanup(manager.Stop)
+		for i := range maxWatchRecordChannelSize + 2 {
+			manager.AddWatch(&QuarantineRecord{
+				ID: int64(i + 1), ResourceGroupName: "default", WatchText: "select 1", EndTime: NullTime,
+			})
+			require.Empty(t, manager.staleQuarantineRecord)
+		}
+		watches := manager.GetWatchList()
+		require.Len(t, watches, 1)
+		require.EqualValues(t, 1, watches[0].ID)
+	})
+
+	t.Run("cache mutations do not start callbacks", func(t *testing.T) {
+		manager := NewRunawayManager(nil, "test", nil, make(chan struct{}), nil, nil)
+		t.Cleanup(manager.Stop)
+		// ttlcache invokes registered callbacks in separate goroutines, even without Start.
+		require.Nil(t, manager.insertionCancel)
+		require.Nil(t, manager.evictionCancel)
+		var record *QuarantineRecord
+		for i := range maxWatchRecordChannelSize + 2 {
+			record = &QuarantineRecord{
+				ID: int64(i + 1), ResourceGroupName: "default", WatchText: "select 1",
+				Source: ManualSource, EndTime: NullTime,
+			}
+			manager.AddWatch(record)
+		}
+		watches := manager.GetWatchList()
+		require.Len(t, watches, 1)
+		require.Equal(t, record.ID, watches[0].ID)
+		manager.removeWatch(record)
+		require.Empty(t, manager.GetWatchList())
+		require.Empty(t, manager.staleQuarantineRecord)
+	})
+}
+
 func (stubOwnerManager) IsOwner() bool { return true }
 
 type stubDDL struct {
