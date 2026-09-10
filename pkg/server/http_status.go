@@ -45,6 +45,7 @@ import (
 	autoid "github.com/pingcap/tidb/pkg/autoid_service"
 	"github.com/pingcap/tidb/pkg/config"
 	"github.com/pingcap/tidb/pkg/config/deploymode"
+	"github.com/pingcap/tidb/pkg/config/diagnosticmode"
 	"github.com/pingcap/tidb/pkg/config/kerneltype"
 	"github.com/pingcap/tidb/pkg/kv"
 	"github.com/pingcap/tidb/pkg/parser/mysql"
@@ -75,7 +76,14 @@ import (
 
 const defaultStatusPort = 10080
 
+func (s *Server) statusHTTPEnabled() bool {
+	return s.cfg.Status.ReportStatus && !diagnosticmode.Enabled()
+}
+
 func (s *Server) startStatusHTTP() error {
+	if !s.statusHTTPEnabled() {
+		return nil
+	}
 	err := s.initHTTPListener()
 	if err != nil {
 		return err
@@ -272,6 +280,7 @@ func (s *Server) startHTTPServer() {
 		router.Handle("/dxf/schedule", tikvhandler.NewDXFScheduleHandler()).Name("DXF_Schedule")
 		router.Handle("/dxf/schedule/tune", tikvhandler.NewDXFScheduleTuneHandler(tikvHandlerTool.Store.(kv.Storage))).Name("DXF_Schedule_Tune")
 		router.Handle("/dxf/task/active", tikvhandler.NewDXFActiveTaskHandler()).Name("DXF_Task_Active")
+		router.Handle("/dxf/nodes", tikvhandler.NewDXFNodesHandler()).Name("DXF_Nodes")
 		router.Handle("/dxf/task/history", tikvhandler.NewDXFTaskHistoryHandler()).Name("DXF_Task_History")
 		// These APIs update only the TiDB process that handles the request and are not persisted.
 		router.Handle("/dxf/schedule/max_concurrent_task", tikvhandler.NewDXFTaskMaxConcurrentHandler()).Name("DXF_Schedule_Max_Concurrent_Task")
