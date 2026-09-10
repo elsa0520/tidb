@@ -19,7 +19,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pingcap/tidb/pkg/config/diagnosticmode"
 	"github.com/stretchr/testify/require"
 )
 
@@ -28,17 +27,6 @@ type delRangeExecWrapperForTest struct {
 	consumed int
 	sql      string
 	params   []any
-}
-
-func TestShouldStartDeleteRangeEmulator(t *testing.T) {
-	t.Cleanup(diagnosticmode.SetForTest(false))
-	require.True(t, shouldStartDeleteRangeEmulator(false))
-	require.False(t, shouldStartDeleteRangeEmulator(true))
-
-	t.Run("diagnostic mode", func(t *testing.T) {
-		t.Cleanup(diagnosticmode.SetForTest(true))
-		require.False(t, shouldStartDeleteRangeEmulator(false))
-	})
 }
 
 func (*delRangeExecWrapperForTest) UpdateTSOForJob() error { return nil }

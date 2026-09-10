@@ -24,7 +24,6 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/kvrpcpb"
-	"github.com/pingcap/tidb/pkg/config/diagnosticmode"
 	"github.com/pingcap/tidb/pkg/ddl/logutil"
 	sess "github.com/pingcap/tidb/pkg/ddl/session"
 	"github.com/pingcap/tidb/pkg/ddl/util"
@@ -107,7 +106,7 @@ func (dr *delRange) addDelRangeJob(ctx context.Context, job *model.Job) error {
 		logutil.DDLLogger().Error("add job into delete-range table failed", zap.Int64("jobID", job.ID), zap.String("jobType", job.Type.String()), zap.Error(err))
 		return errors.Trace(err)
 	}
-	if shouldStartDeleteRangeEmulator(dr.storeSupport) {
+	if !dr.storeSupport {
 		dr.emulatorCh <- struct{}{}
 	}
 	logutil.DDLLogger().Info("add job into delete-range table", zap.Int64("jobID", job.ID), zap.String("jobType", job.Type.String()))
@@ -152,14 +151,10 @@ func (dr *delRange) removeFromGCDeleteRange(ctx context.Context, jobID int64) er
 
 // start implements delRangeManager interface.
 func (dr *delRange) start() {
-	if shouldStartDeleteRangeEmulator(dr.storeSupport) {
+	if !dr.storeSupport {
 		dr.wait.Add(1)
 		go dr.startEmulator()
 	}
-}
-
-func shouldStartDeleteRangeEmulator(storeSupport bool) bool {
-	return !storeSupport && !diagnosticmode.Enabled()
 }
 
 // clear implements delRangeManager interface.

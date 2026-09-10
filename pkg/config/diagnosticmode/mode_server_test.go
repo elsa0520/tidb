@@ -69,6 +69,34 @@ func TestDumpTiDBServerGoroutinesInDiagnosticMode(t *testing.T) {
 				"github.com/pingcap/tidb/pkg/server.(*Server).startStatusServerAndRPCServer",
 			},
 		},
+		{
+			taskName: "TTL",
+			goroutines: []string{
+				"github.com/pingcap/tidb/pkg/ttl/ttlworker.(*JobManager).jobLoop",
+				"github.com/pingcap/tidb/pkg/ttl/ttlworker.(*ttlScanWorker).loop",
+				"github.com/pingcap/tidb/pkg/ttl/ttlworker.(*ttlDeleteWorker).loop",
+			},
+		},
+		{
+			taskName: "Log Backup",
+			goroutines: []string{
+				"github.com/pingcap/tidb/br/pkg/streamhelper/daemon.(*OwnerDaemon).Begin.func1",
+				"github.com/pingcap/tidb/br/pkg/streamhelper.AdvancerExt.startListen.func3",
+				"github.com/pingcap/tidb/br/pkg/streamhelper.(*CheckpointAdvancer).StartTaskListener.func1",
+				"github.com/pingcap/tidb/br/pkg/streamhelper.(*CheckpointAdvancer).SpawnSubscriptionHandler.func1",
+				"github.com/pingcap/tidb/br/pkg/streamhelper.(*CheckpointAdvancer).runLogBackupConfigUpdater",
+				"github.com/pingcap/tidb/br/pkg/streamhelper.(*CheckpointAdvancer).OnBecomeOwner.func1",
+			},
+		},
+		{
+			taskName: "GC",
+			goroutines: []string{
+				"github.com/pingcap/tidb/pkg/store/gcworker.(*GCWorker).start",
+				"github.com/pingcap/tidb/pkg/domain/crossks.(*Manager).RunSystemKSGCLoop",
+				"github.com/pingcap/tidb/pkg/domain.(*Domain).DumpFileGcCheckerLoop.func1",
+				"github.com/pingcap/tidb/pkg/resourcegroup/runaway.(*Manager).deleteExpiredRows",
+			},
+		},
 	}
 	for _, backgroundGoroutine := range backgroundGoroutines {
 		for _, goroutine := range backgroundGoroutine.goroutines {
