@@ -53,11 +53,24 @@ func TestDumpTiDBServerGoroutinesInDiagnosticMode(t *testing.T) {
 	var buf bytes.Buffer
 	goroutineProfile := pprof.Lookup("goroutine")
 	require.NotNil(t, goroutineProfile)
-	require.NoError(t, goroutineProfile.WriteTo(&buf, 2))
+	// RunInGoTestChan closes after launching the listener, but the goroutine
+	// may not have entered startNetworkListener yet. Wait for that frame before
+	// using the snapshot to check the diagnostic startup behavior.
+	require.Eventually(t, func() bool {
+		buf.Reset()
+		if err := goroutineProfile.WriteTo(&buf, 2); err != nil {
+			return false
+		}
+		return bytes.Contains(buf.Bytes(), []byte("github.com/pingcap/tidb/pkg/server.(*Server).startNetworkListener"))
+	}, 10*time.Second, 10*time.Millisecond, "network listener did not appear in the goroutine profile")
 
 	dump := buf.String()
 	require.Contains(t, dump, "goroutine ")
 	require.Contains(t, dump, "github.com/pingcap/tidb/pkg/server.(*Server).startNetworkListener")
+	// This mockstore snapshot is a smoke check, not proof that every startup
+	// path was exercised: Log Backup needs PD/etcd, TiKV GC needs a real store,
+	// cross-keyspace GC needs a nextgen SYSTEM keyspace, and Runaway GC is
+	// timer-driven. Their startup gates also need targeted regression tests.
 	backgroundGoroutines := []struct {
 		taskName   string
 		goroutines []string

@@ -869,6 +869,13 @@ func (do *Domain) Start(startMode ddl.StartMode) error {
 			return err
 		}
 	}
+	do.startSystemKSGCLoop()
+	do.initInferenceProviders()
+
+	return nil
+}
+
+func (do *Domain) startSystemKSGCLoop() {
 	// Only the SYSTEM keyspace domain runs this GC loop: user-keyspace domains
 	// only access the long-lived SYSTEM keyspace runtime, which is never evicted
 	// here.
@@ -881,9 +888,6 @@ func (do *Domain) Start(startMode ddl.StartMode) error {
 			do.crossKSSessMgr.RunSystemKSGCLoop(do.ctx)
 		}, "crossKSSessMgrGCLoop")
 	}
-	do.initInferenceProviders()
-
-	return nil
 }
 
 func (do *Domain) loadSysKSInfoSchema() error {

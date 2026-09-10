@@ -89,11 +89,9 @@ func (do *Domain) requestUnitsWriterLoop() {
 				}
 				time.Sleep(time.Second)
 			}
-			if shouldRunBackgroundGC() {
-				// try gc outdated rows
-				if err := ruWriter.GCOutdatedRecords(lastTime); err != nil {
-					logutil.BgLogger().Warn("[ru_stats] gc outdated rowd failed, will try next time.", zap.Error(err))
-				}
+			// try gc outdated rows
+			if err := ruWriter.GCOutdatedRecords(lastTime); err != nil {
+				logutil.BgLogger().Warn("[ru_stats] gc outdated rowd failed, will try next time.", zap.Error(err))
 			}
 
 			logutil.BgLogger().Info("[ru_stats] finish write ru historical data", zap.String("end_time", lastTime.Format(time.DateTime)),
@@ -236,8 +234,12 @@ func (r *RUStatsWriter) insertRUStats(stats *meta.RUStats) error {
 	return err
 }
 
-// GCOutdatedRecords delete outdated records from target table.
+// GCOutdatedRecords deletes outdated records from the target table.
+// In diagnostic mode it returns without accessing storage.
 func (r *RUStatsWriter) GCOutdatedRecords(lastEndTime time.Time) error {
+	if !shouldRunBackgroundGC() {
+		return nil
+	}
 	gcEndDate := lastEndTime.Add(-ruStatsGCDuration).Format(time.DateTime)
 	countSQL := fmt.Sprintf("SELECT count(*) FROM mysql.request_unit_by_group where end_time <= '%s'", gcEndDate)
 	rows, err := runaway.ExecRCRestrictedSQL(r.sessPool, countSQL, nil)
