@@ -19,6 +19,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pingcap/tidb/pkg/config/diagnosticmode"
 	"github.com/pingcap/tidb/pkg/kv"
 	"github.com/pingcap/tidb/pkg/store/copr"
 	"github.com/stretchr/testify/require"
@@ -55,6 +56,43 @@ func (*IdleCoordinator) IsClosed() bool {
 // GetNodeCnt implements MppCoordinator interface function.
 func (*IdleCoordinator) GetNodeCnt() int {
 	return 0
+}
+
+func TestRunInDiagnosticMode(t *testing.T) {
+	t.Run("stop before run", func(t *testing.T) {
+		require.NotPanics(t, newMPPCoordinatorManger().Stop)
+	})
+	for _, diagnostic := range []bool{false, true} {
+		name := "normal"
+		if diagnostic {
+			name = "diagnostic"
+		}
+		t.Run(name, func(t *testing.T) {
+			t.Cleanup(diagnosticmode.SetForTest(diagnostic))
+			manager := newMPPCoordinatorManger()
+			manager.Run()
+			t.Cleanup(manager.Stop)
+			if diagnostic {
+				require.Nil(t, manager.ctx)
+				require.Nil(t, manager.cancel)
+			} else {
+				require.NotNil(t, manager.ctx)
+				require.NotNil(t, manager.cancel)
+				require.Positive(t, manager.maxLifeTime)
+			}
+
+			// Disabling the sweeper must not disable foreground bookkeeping.
+			id := CoordinatorUniqueID{GatherID: 1}
+			require.NoError(t, manager.Register(id, &IdleCoordinator{}))
+			require.Equal(t, 1, manager.GetCoordCount())
+			manager.Unregister(id)
+			require.Zero(t, manager.GetCoordCount())
+			require.NotPanics(t, manager.Stop)
+			if !diagnostic {
+				require.ErrorIs(t, manager.ctx.Err(), context.Canceled)
+			}
+		})
+	}
 }
 
 func TestDetectAndDelete(t *testing.T) {

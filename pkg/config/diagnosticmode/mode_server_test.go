@@ -23,6 +23,7 @@ import (
 	"github.com/pingcap/tidb/pkg/config"
 	"github.com/pingcap/tidb/pkg/config/diagnosticmode"
 	"github.com/pingcap/tidb/pkg/config/kerneltype"
+	"github.com/pingcap/tidb/pkg/executor/mppcoordmanager"
 	tidbserver "github.com/pingcap/tidb/pkg/server"
 	"github.com/pingcap/tidb/pkg/session"
 	"github.com/pingcap/tidb/pkg/store/mockstore"
@@ -43,6 +44,10 @@ func TestDumpTiDBServerGoroutinesInDiagnosticMode(t *testing.T) {
 	enableServerRunInGoTest(t)
 
 	require.True(t, diagnosticmode.Enabled())
+
+	// BootstrapSession does not run this process-wide manager; main normally does.
+	mppcoordmanager.InstanceMPPCoordinatorManager.Run()
+	t.Cleanup(mppcoordmanager.InstanceMPPCoordinatorManager.Stop)
 
 	server, cfg := startTiDBServer(t)
 	require.True(t, cfg.Status.ReportStatus)
@@ -80,6 +85,12 @@ func TestDumpTiDBServerGoroutinesInDiagnosticMode(t *testing.T) {
 			goroutines: []string{
 				"github.com/pingcap/tidb/pkg/server.(*Server).startHTTPServer",
 				"github.com/pingcap/tidb/pkg/server.(*Server).startStatusServerAndRPCServer",
+			},
+		},
+		{
+			taskName: "MPP coordinator manager",
+			goroutines: []string{
+				"github.com/pingcap/tidb/pkg/executor/mppcoordmanager.(*MPPCoordinatorManager).Run.func1",
 			},
 		},
 		{

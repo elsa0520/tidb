@@ -24,6 +24,7 @@ go_test(
     deps = [
         "//pkg/config",
         "//pkg/config/kerneltype",
+        "//pkg/executor/mppcoordmanager",
         "//pkg/server",
         "//pkg/session",
         "//pkg/store/mockstore",

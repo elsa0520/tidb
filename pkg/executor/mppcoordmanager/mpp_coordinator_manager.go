@@ -22,6 +22,7 @@ import (
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/mpp"
+	"github.com/pingcap/tidb/pkg/config/diagnosticmode"
 	"github.com/pingcap/tidb/pkg/executor/metrics"
 	"github.com/pingcap/tidb/pkg/kv"
 	"github.com/pingcap/tidb/pkg/store/copr"
@@ -56,6 +57,10 @@ type MPPCoordinatorManager struct {
 
 // Run use a loop to detect and remove out of time Coordinators
 func (m *MPPCoordinatorManager) Run() {
+	if diagnosticmode.Enabled() {
+		logutil.BgLogger().Info("don't run MPP coordinator manager", zap.String("reason", "diagnostic mode"))
+		return
+	}
 	m.ctx, m.cancel = context.WithCancel(context.Background())
 	m.wg.Add(1)
 	m.maxLifeTime = uint64(copr.TiFlashReadTimeoutUltraLong.Nanoseconds() + detectFrequency.Nanoseconds())
@@ -96,7 +101,9 @@ func (m *MPPCoordinatorManager) detectAndDelete(nowTs uint64) {
 
 // Stop stops background goroutine
 func (m *MPPCoordinatorManager) Stop() {
-	m.cancel()
+	if m.cancel != nil {
+		m.cancel()
+	}
 	m.wg.Wait()
 }
 

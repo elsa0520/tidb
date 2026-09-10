@@ -16,26 +16,32 @@ package main
 
 import (
 	"context"
+	"net"
 	"os"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
 
+	pb "github.com/pingcap/kvproto/pkg/externalworkloadpb"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/pingcap/tidb/pkg/config"
 	"github.com/pingcap/tidb/pkg/config/deploymode"
 	"github.com/pingcap/tidb/pkg/config/diagnosticmode"
 	"github.com/pingcap/tidb/pkg/config/kerneltype"
 	"github.com/pingcap/tidb/pkg/extworkload"
+	"github.com/pingcap/tidb/pkg/kv"
 	"github.com/pingcap/tidb/pkg/parser/mysql"
 	"github.com/pingcap/tidb/pkg/sessionctx/vardef"
 	"github.com/pingcap/tidb/pkg/sessionctx/variable"
 	"github.com/pingcap/tidb/pkg/testkit"
 	"github.com/pingcap/tidb/pkg/testkit/testsetup"
 	"github.com/stretchr/testify/require"
+	"github.com/tikv/client-go/v2/tikv"
 	pd "github.com/tikv/pd/client"
 	"go.opencensus.io/stats/view"
 	"go.uber.org/goleak"
+	"google.golang.org/grpc"
 )
 
 var isCoverageServer string
@@ -214,6 +220,102 @@ func TestInitDeployMode(t *testing.T) {
 		require.Equal(t, "/tmp/flag-sql-cert.pem", cfg.Security.SSLCert)
 		require.Equal(t, "/tmp/flag-sql-key.pem", cfg.Security.SSLKey)
 	})
+}
+
+type externalWorkloadTestController struct {
+	pb.UnimplementedExternalWorkloadControllerServer
+	pings atomic.Int64
+}
+
+func (c *externalWorkloadTestController) Ping(context.Context, *pb.PingRequest) (*pb.Response, error) {
+	c.pings.Add(1)
+	return &pb.Response{}, nil
+}
+
+type externalWorkloadTestCodec struct {
+	tikv.Codec
+	meta *keyspacepb.KeyspaceMeta
+}
+
+func (c *externalWorkloadTestCodec) GetKeyspaceMeta() *keyspacepb.KeyspaceMeta { return c.meta }
+
+type externalWorkloadTestStore struct {
+	kv.Storage
+	codec tikv.Codec
+}
+
+func (s *externalWorkloadTestStore) GetCodec() tikv.Codec { return s.codec }
+
+func TestInitExternalWorkloadManagerInDiagnosticMode(t *testing.T) {
+	if kerneltype.IsClassic() {
+		t.Skip("external workload manager requires nextgen starter mode")
+	}
+	t.Cleanup(config.RestoreFunc())
+	originalMode := deploymode.Get()
+	t.Cleanup(func() { require.NoError(t, deploymode.Set(originalMode)) })
+	require.NoError(t, deploymode.Set(deploymode.Starter))
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	controller := &externalWorkloadTestController{}
+	server := grpc.NewServer()
+	pb.RegisterExternalWorkloadControllerServer(server, controller)
+	stopped := make(chan struct{})
+	go func() {
+		defer close(stopped)
+		_ = server.Serve(listener)
+	}()
+	t.Cleanup(func() {
+		server.Stop()
+		<-stopped
+	})
+
+	store := testkit.CreateMockStore(t)
+	backend := &externalWorkloadTestStore{
+		Storage: store,
+		codec: &externalWorkloadTestCodec{
+			Codec: store.GetCodec(),
+			meta: &keyspacepb.KeyspaceMeta{
+				Keyspace: &keyspacepb.KeyspaceMeta_Id{Id: 42},
+				Name:     "diagnostic-test",
+				Config: map[string]string{
+					pd.KeyspaceConfigGCManagementType: pd.KeyspaceConfigGCManagementTypeKeyspaceLevel,
+				},
+			},
+		},
+	}
+	for _, role := range []config.ExternalWorkloadRole{
+		config.RoleMaster, config.RoleGCV2Worker, config.RoleTTLTaskWorker, config.RoleAutoAnalyzeWorker,
+	} {
+		t.Run(string(role), func(t *testing.T) {
+			config.UpdateGlobal(func(cfg *config.Config) {
+				cfg.ExternalWorkload = config.ExternalWorkload{
+					Enable: true, Role: role, ControllerAddr: listener.Addr().String(), TidbPool: "test-pool",
+				}
+			})
+			for _, diagnostic := range []bool{false, true} {
+				name := "normal"
+				if diagnostic {
+					name = "diagnostic"
+				}
+				t.Run(name, func(t *testing.T) {
+					t.Cleanup(diagnosticmode.SetForTest(diagnostic))
+					before := controller.pings.Load()
+					mgr := initExternalWorkloadManager(context.Background(), backend)
+					t.Cleanup(func() { closeExternalWorkloadManager(backend, mgr) })
+					if diagnostic {
+						require.Nil(t, mgr)
+						require.Nil(t, extworkload.GetManagerFromStore(backend))
+						require.Equal(t, before, controller.pings.Load())
+					} else {
+						require.NotNil(t, mgr)
+						require.Same(t, mgr, extworkload.GetManagerFromStore(backend))
+						require.Equal(t, before+1, controller.pings.Load())
+					}
+				})
+			}
+		})
+	}
 }
 
 type gcv2InitManager struct {

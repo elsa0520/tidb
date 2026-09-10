@@ -326,6 +326,10 @@ func initDeployMode(cfg *config.Config) error {
 }
 
 func initExternalWorkloadManager(ctx context.Context, storage kv.Storage) extworkload.Manager {
+	if diagnosticmode.Enabled() {
+		logutil.BgLogger().Info("don't initialize external workload manager", zap.String("reason", "diagnostic mode"))
+		return nil
+	}
 	if !deploymode.IsStarter() {
 		return nil
 	}
