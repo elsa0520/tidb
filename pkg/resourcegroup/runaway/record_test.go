@@ -31,18 +31,38 @@ import (
 
 type stubOwnerManager struct{ owner.Manager }
 
-func TestNewRunawayRecordGCTicker(t *testing.T) {
+func TestRunawayManagerInDiagnosticMode(t *testing.T) {
 	t.Cleanup(diagnosticmode.SetForTest(false))
-	ticker, tickerCh := newRunawayRecordGCTicker(time.Hour)
-	require.NotNil(t, ticker)
-	require.NotNil(t, tickerCh)
-	ticker.Stop()
+	rm := NewRunawayManager(nil, "test", nil, make(chan struct{}), nil, nil)
+	require.True(t, rm.watchListStarted)
+	// Shutdown depends on the actual startup state, not the current mode.
+	restoreMode := diagnosticmode.SetForTest(true)
+	rm.Stop()
+	restoreMode()
 
 	t.Run("diagnostic mode", func(t *testing.T) {
 		t.Cleanup(diagnosticmode.SetForTest(true))
-		diagnosticTicker, diagnosticTickerCh := newRunawayRecordGCTicker(time.Hour)
-		require.Nil(t, diagnosticTicker)
-		require.Nil(t, diagnosticTickerCh)
+		rm := NewRunawayManager(nil, "test", nil, make(chan struct{}), nil, nil)
+		require.False(t, rm.watchListStarted)
+		// The disabled checker must not access the nil resource controller.
+		checker := rm.DeriveChecker("default", "select 1", "sql-digest", "plan-digest", time.Now())
+		require.Nil(t, checker)
+		group, err := checker.BeforeExecutor()
+		require.NoError(t, err)
+		require.Empty(t, group)
+
+		restoreMode := diagnosticmode.SetForTest(false)
+		defer restoreMode()
+		stopped := make(chan struct{})
+		go func() {
+			rm.Stop()
+			close(stopped)
+		}()
+		select {
+		case <-stopped:
+		case <-time.After(5 * time.Second):
+			t.Fatal("stopping an unstarted watch cache blocked")
+		}
 	})
 }
 

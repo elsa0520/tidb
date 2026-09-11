@@ -64,6 +64,8 @@ type Manager struct {
 	// action "judging whether there is this record in the current watch list and adding records" have atomicity.
 	queryLock sync.Mutex
 	watchList *ttlcache.Cache[string, *QuarantineRecord]
+	// Remember startup state so Stop never waits on a cache that was not started.
+	watchListStarted bool
 	// activeGroup is used to manage the active runaway watches of resource group.
 	// It uses sync.Map + atomic.Int64 for lock-free reads on the per-query hot path.
 	activeGroup sync.Map // map[string]*atomic.Int64
@@ -106,10 +108,14 @@ func NewRunawayManager(
 		ttlcache.WithCapacity[string, *QuarantineRecord](maxWatchListCap),
 		ttlcache.WithDisableTouchOnHit[string, *QuarantineRecord](),
 	)
-	go watchList.Start()
+	watchListStarted := !diagnosticmode.Enabled()
+	if watchListStarted {
+		go watchList.Start()
+	}
 	m := &Manager{
 		ResourceGroupCtl:      resourceGroupCtl,
 		watchList:             watchList,
+		watchListStarted:      watchListStarted,
 		serverID:              serverAddr,
 		runawayQueriesChan:    make(chan *Record, maxWatchRecordChannelSize),
 		quarantineChan:        make(chan *QuarantineRecord, maxWatchRecordChannelSize),
@@ -192,10 +198,7 @@ func (rm *Manager) RunawayRecordFlushLoop() {
 		rm.sysSessionPool,
 	)
 
-	runawayRecordGCTicker, runawayRecordGCTickerCh := newRunawayRecordGCTicker(gcInterval)
-	if runawayRecordGCTicker != nil {
-		defer runawayRecordGCTicker.Stop()
-	}
+	runawayRecordGCTicker := time.NewTicker(gcInterval)
 	recordCh := rm.runawayRecordChan()
 	quarantineRecordCh := rm.quarantineRecordChan()
 	staleQuarantineRecordCh := rm.staleQuarantineRecordChan()
@@ -218,7 +221,7 @@ func (rm *Manager) RunawayRecordFlushLoop() {
 				Match:             r.Match,
 			}
 			runawayRecordFlusher.add(key, r)
-		case <-runawayRecordGCTickerCh: // delete expired runaway records periodically
+		case <-runawayRecordGCTicker.C: // delete expired runaway records periodically
 			go rm.deleteExpiredRows(runawayRecordExpiredDuration)
 		case <-quarantineRecordFlusher.tickerCh(): // flush quarantine records periodically
 			quarantineRecordFlusher.flush()
@@ -233,14 +236,6 @@ func (rm *Manager) RunawayRecordFlushLoop() {
 			staleQuarantineFlusher.add(r.ID, r)
 		}
 	}
-}
-
-func newRunawayRecordGCTicker(interval time.Duration) (*time.Ticker, <-chan time.Time) {
-	if diagnosticmode.Enabled() {
-		return nil, nil
-	}
-	ticker := time.NewTicker(interval)
-	return ticker, ticker.C
 }
 
 // RunawayWatchSyncLoop is used to sync runaway watch records.
@@ -414,7 +409,7 @@ func (rm *Manager) Stop() {
 	if rm == nil {
 		return
 	}
-	if rm.watchList != nil {
+	if rm.watchList != nil && rm.watchListStarted {
 		rm.watchList.Stop()
 	}
 }

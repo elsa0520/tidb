@@ -840,8 +840,7 @@ func (do *Domain) Start(startMode ddl.StartMode) error {
 		do.info.ServerInfoSyncer().ServerInfoSyncLoop(do.store, do.exit)
 	}, "infoSyncerKeeper")
 	do.wg.Run(do.globalConfigSyncerKeeper, "globalConfigSyncerKeeper")
-	do.wg.Run(do.runawayManager.RunawayRecordFlushLoop, "runawayRecordFlushLoop")
-	do.wg.Run(do.runawayManager.RunawayWatchSyncLoop, "runawayWatchSyncLoop")
+	do.startRunawayLoops()
 	do.wg.Run(do.requestUnitsWriterLoop, "requestUnitsWriterLoop")
 	skipRegisterToDashboard := gCfg.SkipRegisterToDashboard
 	if !skipRegisterToDashboard {
@@ -970,6 +969,14 @@ func (do *Domain) ExternalWorkloadManager() extworkload.Manager {
 
 func shouldStartLogBackupAdvancer() bool {
 	return !diagnosticmode.Enabled()
+}
+
+func (do *Domain) startRunawayLoops() {
+	if diagnosticmode.Enabled() {
+		return
+	}
+	do.wg.Run(do.runawayManager.RunawayRecordFlushLoop, "runawayRecordFlushLoop")
+	do.wg.Run(do.runawayManager.RunawayWatchSyncLoop, "runawayWatchSyncLoop")
 }
 
 func shouldRunBackgroundGC() bool {

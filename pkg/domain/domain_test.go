@@ -42,6 +42,7 @@ import (
 	"github.com/pingcap/tidb/pkg/parser/ast"
 	"github.com/pingcap/tidb/pkg/parser/mysql"
 	"github.com/pingcap/tidb/pkg/planner/core/resolve"
+	"github.com/pingcap/tidb/pkg/resourcegroup/runaway"
 	"github.com/pingcap/tidb/pkg/sessionctx/vardef"
 	"github.com/pingcap/tidb/pkg/sessionctx/variable"
 	"github.com/pingcap/tidb/pkg/store/mockstore"
@@ -295,6 +296,27 @@ type logBackupTestStorage struct {
 type logBackupStorage interface {
 	kv.Storage
 	tikv.Storage
+}
+
+func TestStartRunawayLoops(t *testing.T) {
+	t.Cleanup(diagnosticmode.SetForTest(false))
+	exit := make(chan struct{})
+	close(exit)
+	rm := runaway.NewRunawayManager(nil, "test", nil, exit, nil, nil)
+	t.Cleanup(rm.Stop)
+	dom := &Domain{
+		runawayManager: rm,
+		wg:             util.NewWaitGroupEnhancedWrapper("", nil, false),
+	}
+	dom.startRunawayLoops()
+	dom.wg.Wait()
+
+	t.Run("diagnostic mode", func(t *testing.T) {
+		t.Cleanup(diagnosticmode.SetForTest(true))
+		// No manager or wait group is needed: return before spawning goroutines.
+		dom := &Domain{}
+		require.NotPanics(t, dom.startRunawayLoops)
+	})
 }
 
 func TestShouldStartLogBackupAdvancer(t *testing.T) {

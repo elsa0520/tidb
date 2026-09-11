@@ -69,8 +69,8 @@ func TestDumpTiDBServerGoroutinesInDiagnosticMode(t *testing.T) {
 	require.Contains(t, dump, "github.com/pingcap/tidb/pkg/server.(*Server).startNetworkListener")
 	// This mockstore snapshot is a smoke check, not proof that every startup
 	// path was exercised: Log Backup needs PD/etcd, TiKV GC needs a real store,
-	// cross-keyspace GC needs a nextgen SYSTEM keyspace, and Runaway GC is
-	// timer-driven. Their startup gates also need targeted regression tests.
+	// cross-keyspace GC needs a nextgen SYSTEM keyspace, and the Runaway watch
+	// cache needs a resource controller. Their startup gates also need targeted tests.
 	backgroundGoroutines := []struct {
 		taskName   string
 		goroutines []string
@@ -99,6 +99,14 @@ func TestDumpTiDBServerGoroutinesInDiagnosticMode(t *testing.T) {
 				"github.com/pingcap/tidb/br/pkg/streamhelper.(*CheckpointAdvancer).SpawnSubscriptionHandler.func1",
 				"github.com/pingcap/tidb/br/pkg/streamhelper.(*CheckpointAdvancer).runLogBackupConfigUpdater",
 				"github.com/pingcap/tidb/br/pkg/streamhelper.(*CheckpointAdvancer).OnBecomeOwner.func1",
+			},
+		},
+		{
+			taskName: "Runaway",
+			goroutines: []string{
+				"github.com/pingcap/tidb/pkg/resourcegroup/runaway.(*Manager).RunawayRecordFlushLoop",
+				"github.com/pingcap/tidb/pkg/resourcegroup/runaway.(*Manager).RunawayWatchSyncLoop",
+				"github.com/pingcap/tidb/pkg/resourcegroup/runaway.NewRunawayManager.gowrap1",
 			},
 		},
 		{
