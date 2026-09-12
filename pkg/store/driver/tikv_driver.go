@@ -26,6 +26,7 @@ import (
 	"github.com/pingcap/errors"
 	deadlockpb "github.com/pingcap/kvproto/pkg/deadlock"
 	"github.com/pingcap/kvproto/pkg/kvrpcpb"
+	"github.com/pingcap/tidb/pkg/config/diagnosticmode"
 	"github.com/pingcap/tidb/pkg/kv"
 	"github.com/pingcap/tidb/pkg/metaservice"
 	"github.com/pingcap/tidb/pkg/metrics"
@@ -48,7 +49,9 @@ import (
 	"github.com/tikv/pd/client/opt"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/keepalive"
+	"google.golang.org/grpc/status"
 )
 
 type storeCache struct {
@@ -162,13 +165,17 @@ func (d *TiKVDriver) OpenWithOptions(path string, options ...Option) (resStore k
 		apiCtx = pd.NewAPIContextV2(keyspaceName)
 	}
 
+	pdClientOptions := d.pdClientOptions()
+	if diagnosticmode.Enabled() {
+		pdClientOptions = append(pdClientOptions, diagnosticPDClientOption())
+	}
 	pdCli, err = pd.NewClientWithAPIContext(context.Background(), apiCtx, "tidb-tikv-driver", pdAddrsInConfigPath,
 		pd.SecurityOption{
 			CAPath:   d.security.ClusterSSLCA,
 			CertPath: d.security.ClusterSSLCert,
 			KeyPath:  d.security.ClusterSSLKey,
 		},
-		d.pdClientOptions()...)
+		pdClientOptions...)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -202,10 +209,13 @@ func (d *TiKVDriver) OpenWithOptions(path string, options ...Option) (resStore k
 	}
 
 	codec := pdClient.GetCodec()
-	rpcClient := tikv.NewRPCClient(
+	var rpcClient tikv.Client = tikv.NewRPCClient(
 		tikv.WithSecurity(d.security),
 		tikv.WithCodec(codec),
 	)
+	if diagnosticmode.Enabled() {
+		rpcClient = &diagnosticKVClient{Client: rpcClient}
+	}
 
 	safePointSetup, err := newSafePointKV(pdCli, codec, tlsConfig)
 	if err != nil {
@@ -305,6 +315,31 @@ func (d *TiKVDriver) pdClientOptions() []opt.ClientOption {
 		opts = append(opts, opt.WithMetricsLabels(labels))
 	}
 	return opts
+}
+
+// diagnosticPDClientOption installs the protection at the gRPC connection
+// boundary. Keeping the normal-mode result empty preserves existing behavior.
+func diagnosticPDClientOption() opt.ClientOption {
+	return opt.WithGRPCDialOptions(
+		grpc.WithChainUnaryInterceptor(diagnosticPDUnaryInterceptor),
+		grpc.WithChainStreamInterceptor(diagnosticPDStreamInterceptor),
+	)
+}
+
+func diagnosticPDUnaryInterceptor(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
+	switch method {
+	case "/pdpb.PD/GetMembers", "/pdpb.PD/GetStore", "/pdpb.PD/GetRegion":
+		return invoker(ctx, method, req, reply, cc, opts...)
+	default:
+		return status.Errorf(codes.PermissionDenied, "diagnostic mode: blocked PD RPC %s", method)
+	}
+}
+
+func diagnosticPDStreamInterceptor(ctx context.Context, desc *grpc.StreamDesc, cc *grpc.ClientConn, method string, streamer grpc.Streamer, opts ...grpc.CallOption) (grpc.ClientStream, error) {
+	if method != "/pdpb.PD/Tso" && method != "/tsopb.TSO/Tso" {
+		return nil, status.Errorf(codes.PermissionDenied, "diagnostic mode: blocked PD stream %s", method)
+	}
+	return streamer(ctx, desc, cc, method, opts...)
 }
 
 type tikvStore struct {
@@ -498,6 +533,32 @@ func (s *tikvStore) GetKeyspace() string {
 // injectTraceClient injects trace info to the tikv request
 type injectTraceClient struct {
 	tikv.Client
+}
+
+// diagnosticKVClient is intentionally a deny-by-default RPC guard. The
+// allowlist is a placeholder and should be expanded only after each command's
+// read-only semantics have been reviewed.
+type diagnosticKVClient struct {
+	tikv.Client
+}
+
+func (c *diagnosticKVClient) allowed(req *tikvrpc.Request) bool {
+	return req != nil && (req.Type == tikvrpc.CmdGet || req.Type == tikvrpc.CmdBatchGet || req.Type == tikvrpc.CmdScan)
+}
+
+func (c *diagnosticKVClient) SendRequest(ctx context.Context, addr string, req *tikvrpc.Request, timeout time.Duration) (*tikvrpc.Response, error) {
+	if !c.allowed(req) {
+		return nil, status.Error(codes.PermissionDenied, "diagnostic mode: blocked KV RPC")
+	}
+	return c.Client.SendRequest(ctx, addr, req, timeout)
+}
+
+func (c *diagnosticKVClient) SendRequestAsync(ctx context.Context, addr string, req *tikvrpc.Request, cb async.Callback[*tikvrpc.Response]) {
+	if !c.allowed(req) {
+		cb.Invoke(nil, status.Error(codes.PermissionDenied, "diagnostic mode: blocked KV RPC"))
+		return
+	}
+	c.Client.SendRequestAsync(ctx, addr, req, cb)
 }
 
 // SendRequest sends Request.
