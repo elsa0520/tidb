@@ -22,6 +22,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/pingcap/tidb/pkg/keyspace"
 	"github.com/pingcap/tidb/pkg/util"
+	"github.com/pingcap/tidb/pkg/util/diagnosticclient"
 	"github.com/pingcap/tidb/pkg/util/etcd"
 	"github.com/tikv/client-go/v2/tikv"
 	pd "github.com/tikv/pd/client"
@@ -50,7 +51,7 @@ var defaultPDClientFactory PDClientFactory = func(
 	security pd.SecurityOption,
 	opts ...opt.ClientOption,
 ) (pd.Client, error) {
-	return pd.NewClientWithContext(ctx, callerComponent, svrAddrs, security, opts...)
+	return pd.NewClientWithContext(ctx, callerComponent, svrAddrs, security, diagnosticclient.PDClientOptions(opts)...)
 }
 
 // NewEtcdMetaServiceClient creates a ServiceClient backed by etcd and PD clients.

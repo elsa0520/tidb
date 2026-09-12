@@ -42,6 +42,7 @@ import (
 	unimetrics "github.com/pingcap/tidb/pkg/store/mockstore/unistore/metrics"
 	ttlmetrics "github.com/pingcap/tidb/pkg/ttl/metrics"
 	"github.com/pingcap/tidb/pkg/util"
+	"github.com/pingcap/tidb/pkg/util/diagnosticclient"
 	topsqlreporter_metrics "github.com/pingcap/tidb/pkg/util/topsql/reporter/metrics"
 	pd "github.com/tikv/pd/client"
 	"github.com/tikv/pd/client/opt"
@@ -77,7 +78,7 @@ func RegisterMetricsForBR(pdAddrs []string, tls task.TLSConfig, keyspaceName str
 		securityOpt = tls.ToPDSecurityOption()
 	}
 	pdCli, err := pd.NewClient(componentName, pdAddrs, securityOpt,
-		opt.WithCustomTimeoutOption(timeoutSec), opt.WithInitMetricsOption(false))
+		diagnosticclient.PDClientOptions([]opt.ClientOption{opt.WithCustomTimeoutOption(timeoutSec), opt.WithInitMetricsOption(false)})...)
 	if err != nil {
 		return err
 	}
