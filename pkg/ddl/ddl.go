@@ -32,6 +32,7 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/tidb/pkg/config"
+	"github.com/pingcap/tidb/pkg/config/diagnosticmode"
 	"github.com/pingcap/tidb/pkg/config/kerneltype"
 	"github.com/pingcap/tidb/pkg/ddl/ingest"
 	"github.com/pingcap/tidb/pkg/ddl/logutil"
@@ -753,15 +754,21 @@ func newDDL(ctx context.Context, options ...Option) (*ddl, *executor) {
 		// The etcdCli is nil if the store is localstore which is only used for testing.
 		// So we use mockOwnerManager and memSyncer.
 		manager = owner.NewMockManager(ctx, id, opt.Store, util.DDLOwnerKey)
-		schemaVerSyncer = schemaver.NewMemSyncer()
 		serverStateSyncer = serverstate.NewMemSyncer()
 	} else {
 		ownerMgr := getOwnerManager(opt.Store)
 		id = ownerMgr.ID()
 		manager = ownerMgr.OwnerManager()
-		schemaVerSyncer = schemaver.NewEtcdSyncer(etcdCli, id)
 		serverStateSyncer = serverstate.NewEtcdSyncer(etcdCli, util.ServerGlobalState)
 		deadLockCkr = util.NewDeadTableLockChecker(etcdCli)
+	}
+
+	if diagnosticmode.Enabled() {
+		schemaVerSyncer = schemaver.NewDiagnosticSyncer()
+	} else if opt.EtcdCli == nil {
+		schemaVerSyncer = schemaver.NewMemSyncer()
+	} else {
+		schemaVerSyncer = schemaver.NewEtcdSyncer(opt.EtcdCli, id)
 	}
 
 	// TODO: make store and infoCache explicit arguments
@@ -871,6 +878,13 @@ func (d *ddl) newDeleteRangeManager(mock bool) delRangeManager {
 
 // Start implements DDL.Start interface.
 func (d *ddl) Start(startMode StartMode, ctxPool *pools.ResourcePool) error {
+	if diagnosticmode.Enabled() {
+		// Schema loading is owned by Domain and does not need DDL execution resources.
+		if startMode != Normal {
+			return diagnosticmode.ErrDDLNotAllowed
+		}
+		return nil
+	}
 	if kerneltype.IsClassic() {
 		d.detectAndUpdateJobVersion()
 	}
@@ -1109,6 +1123,9 @@ func (d *ddl) CleanUpTempDirLoop(ctx context.Context, path string) {
 // Since ownerManager.CampaignOwner will start a new goroutine to run ownerManager.campaignLoop,
 // we should make sure that before invoking EnableDDL(), ddl is DISABLE.
 func (d *ddl) EnableDDL() error {
+	if diagnosticmode.Enabled() {
+		return diagnosticmode.ErrDDLNotAllowed
+	}
 	err := d.ownerManager.CampaignOwner()
 	return errors.Trace(err)
 }
@@ -1116,6 +1133,9 @@ func (d *ddl) EnableDDL() error {
 // DisableDDL disable this node to execute ddl.
 // We should make sure that before invoking DisableDDL(), ddl is ENABLE.
 func (d *ddl) DisableDDL() error {
+	if diagnosticmode.Enabled() {
+		return nil
+	}
 	if d.ownerManager.IsOwner() {
 		// If there is only one node, we should NOT disable ddl.
 		serverInfo, err := infosync.GetAllServerInfo(d.ctx)
@@ -1248,6 +1268,9 @@ func (d *ddl) cleanDeadTableLock(unlockTables []model.TableLockTpInfo, se model.
 
 // SwitchMDL enables MDL or disable MDL.
 func (d *ddl) SwitchMDL(enable bool) error {
+	if diagnosticmode.Enabled() {
+		return diagnosticmode.ErrDDLNotAllowed
+	}
 	isEnableBefore := vardef.IsMDLEnabled()
 	if isEnableBefore == enable {
 		return nil

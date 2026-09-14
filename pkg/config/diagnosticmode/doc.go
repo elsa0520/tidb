@@ -18,4 +18,13 @@
 // Diagnostic mode is initialized from a command-line flag during startup and
 // cannot be changed afterward. Code that needs to select diagnostic behavior
 // should call Enabled.
+//
+// Schema synchronization in this mode polls existing metadata without publishing
+// server information, topology or schema versions. DDL.Start does not initialize
+// DDL execution resources. min-start-ts reporting is disabled, so long-running
+// reads lose the GC protection supplied by that report. The independent server
+// ID lease and normal timestamp acquisition remain enabled.
+//
+// This component support does not yet reject all SQL submissions or isolate the
+// separate DXF and bootstrap/upgrade paths. It is not a general read-only mode.
 package diagnosticmode

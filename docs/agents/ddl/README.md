@@ -89,6 +89,21 @@ sequenceDiagram
   E-->>S: return result
 ```
 
+## Diagnostic schema loading
+
+Diagnostic mode selects `pkg/ddl/schemaver/diagnostic_syncer.go` before schema
+syncer initialization. The existing InfoSchema ticker still reloads storage
+metadata; schema version publication and MDL background checks are disabled.
+`serverinfo.Syncer` keeps local information and cluster reads but publishes no
+server or topology records. Its leases and min-start-ts reporting are omitted;
+the independent Domain serverID lease is retained.
+
+`DDL.Start` returns before allocating DDL pools, system-table managers, statistics
+or background workers. Domain and cross-keyspace runtimes skip their DDL-only
+pool/refresher setup. This changes only the DDL component lifecycle: SQL rejection,
+DXF startup isolation and bootstrap/upgrade protection are deferred. In particular,
+a stopped submit loop is not a safe rejection mechanism for new DDL requests.
+
 ## Code map (where to look first)
 
 ### Front-end (SQL executor layer)

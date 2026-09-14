@@ -11,6 +11,7 @@ go_library(
     importpath = "github.com/pingcap/tidb/pkg/domain/crossks",
     visibility = ["//visibility:public"],
     deps = [
+        "//pkg/config/diagnosticmode",
         "//pkg/config/kerneltype",
         "//pkg/ddl/jobsubmit",
         "//pkg/ddl/schemaver",
@@ -53,13 +54,15 @@ go_test(
     srcs = [
         "cross_ks_internal_test.go",
         "cross_ks_test.go",
+        "diagnostic_test.go",
         "export_test.go",
     ],
     embed = [":crossks"],
     flaky = True,
-    shard_count = 8,
+    shard_count = 9,
     deps = [
         "//pkg/config",
+        "//pkg/config/diagnosticmode",
         "//pkg/config/kerneltype",
         "//pkg/ddl/schemaver",
         "//pkg/ddl/serverstate",
@@ -84,6 +87,7 @@ go_test(
         "//pkg/testkit/testfailpoint",
         "//pkg/util",
         "//pkg/util/etcd",
+        "//pkg/util/intest",
         "//pkg/util/sqlexec",
         "@com_github_ngaut_pools//:pools",
         "@com_github_pingcap_errors//:errors",

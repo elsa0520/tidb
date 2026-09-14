@@ -809,41 +809,52 @@ func (do *Domain) Start(startMode ddl.StartMode) error {
 		go do.serverIDKeeper()
 	}
 
-	// TODO: Here we create new sessions with sysFac in DDL,
-	// which will use `do` as Domain instead of call `domap.Get`.
-	// That's because `domap.Get` requires a lock, but before
-	// we initialize Domain finish, we can't require that again.
-	// After we remove the lazy logic of creating Domain, we
-	// can simplify code here.
-	sysFac := func() (pools.Resource, error) {
-		return do.sysExecutorFactory(do)
-	}
-	sysCtxPool := pools.NewResourcePool(sysFac, 512, 512, resourceIdleTimeout)
+	if diagnosticmode.Enabled() {
+		if err := do.ddl.Start(startMode, nil); err != nil {
+			return err
+		}
+	} else {
+		// TODO: Here we create new sessions with sysFac in DDL,
+		// which will use `do` as Domain instead of call `domap.Get`.
+		// That's because `domap.Get` requires a lock, but before
+		// we initialize Domain finish, we can't require that again.
+		// After we remove the lazy logic of creating Domain, we
+		// can simplify code here.
+		sysFac := func() (pools.Resource, error) {
+			return do.sysExecutorFactory(do)
+		}
+		sysCtxPool := pools.NewResourcePool(sysFac, 512, 512, resourceIdleTimeout)
 
-	// start the ddl after the domain reload, avoiding some internal sql running before infoSchema construction.
-	err := do.ddl.Start(startMode, sysCtxPool)
-	if err != nil {
-		return err
-	}
-	do.minJobIDRefresher = do.ddl.GetMinJobIDRefresher()
+		// start the ddl after the domain reload, avoiding some internal sql running before infoSchema construction.
+		err := do.ddl.Start(startMode, sysCtxPool)
+		if err != nil {
+			return err
+		}
+		do.minJobIDRefresher = do.ddl.GetMinJobIDRefresher()
 
-	do.isSyncer.SetMinJobIDRefresher(do.minJobIDRefresher)
+		do.isSyncer.SetMinJobIDRefresher(do.minJobIDRefresher)
+	}
+
 	// Local store needs to get the change information for every DDL state in each session.
 	do.wg.Run(func() {
 		do.isSyncer.SyncLoop(do.ctx)
 	}, "loadSchemaInLoop")
-	do.wg.Run(func() {
-		do.isSyncer.MDLCheckLoop(do.ctx)
-	}, "mdlCheckLoop")
+	if !diagnosticmode.Enabled() {
+		do.wg.Run(func() {
+			do.isSyncer.MDLCheckLoop(do.ctx)
+		}, "mdlCheckLoop")
+	}
 	do.wg.Run(do.topNSlowQueryLoop, "topNSlowQueryLoop")
-	do.wg.Run(func() {
-		do.info.ServerInfoSyncer().ServerInfoSyncLoop(do.store, do.exit)
-	}, "infoSyncerKeeper")
+	if !diagnosticmode.Enabled() {
+		do.wg.Run(func() {
+			do.info.ServerInfoSyncer().ServerInfoSyncLoop(do.store, do.exit)
+		}, "infoSyncerKeeper")
+	}
 	do.wg.Run(do.globalConfigSyncerKeeper, "globalConfigSyncerKeeper")
 	do.startRunawayLoops()
 	do.wg.Run(do.requestUnitsWriterLoop, "requestUnitsWriterLoop")
 	skipRegisterToDashboard := gCfg.SkipRegisterToDashboard
-	if !skipRegisterToDashboard {
+	if !skipRegisterToDashboard && !diagnosticmode.Enabled() {
 		do.wg.Run(func() {
 			do.info.ServerInfoSyncer().TopologySyncLoop(do.exit)
 		}, "topologySyncerKeeper")
@@ -856,15 +867,14 @@ func (do *Domain) Start(startMode ddl.StartMode) error {
 	}
 
 	if startMode != ddl.BR {
-		err = do.initLogBackup(do.ctx, pdCli)
-		if err != nil {
+		if err := do.initLogBackup(do.ctx, pdCli); err != nil {
 			return err
 		}
 	}
 
 	// right now we only allow access system keyspace info schema after fully bootstrap.
 	if kv.IsUserKS(do.store) && startMode == ddl.Normal {
-		if err = do.loadSysKSInfoSchema(); err != nil {
+		if err := do.loadSysKSInfoSchema(); err != nil {
 			return err
 		}
 	}

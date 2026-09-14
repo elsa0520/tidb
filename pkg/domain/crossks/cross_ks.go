@@ -25,6 +25,7 @@ import (
 	"github.com/ngaut/pools"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
+	"github.com/pingcap/tidb/pkg/config/diagnosticmode"
 	"github.com/pingcap/tidb/pkg/config/kerneltype"
 	"github.com/pingcap/tidb/pkg/ddl/jobsubmit"
 	"github.com/pingcap/tidb/pkg/ddl/schemaver"
@@ -284,7 +285,12 @@ func (*Manager) createSessionManager(
 	}
 	serverInfoRegistered = true
 
-	schemaVerSyncer := schemaver.NewEtcdSyncer(etcdCli, virtualSvrID)
+	var schemaVerSyncer schemaver.Syncer
+	if diagnosticmode.Enabled() {
+		schemaVerSyncer = schemaver.NewDiagnosticSyncer()
+	} else {
+		schemaVerSyncer = schemaver.NewEtcdSyncer(etcdCli, virtualSvrID)
+	}
 	if err = schemaVerSyncer.Init(ctx); err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -292,8 +298,10 @@ func (*Manager) createSessionManager(
 	// The submit-only DDL path refreshes server state synchronously before
 	// enqueue. Seed the cache here without Init, because Init starts an etcd
 	// watch/session that this runtime does not need or drain.
-	if _, err = serverStateSyncer.GetGlobalState(ctx); err != nil {
-		return nil, errors.Trace(err)
+	if !diagnosticmode.Enabled() {
+		if _, err = serverStateSyncer.GetGlobalState(ctx); err != nil {
+			return nil, errors.Trace(err)
+		}
 	}
 	infoCache := infoschema.NewCache(store, int(vardef.SchemaVersionCacheLimit.Load()))
 	isSyncer := issyncer.NewCrossKSSyncer(store, infoCache, vardef.GetSchemaLease(), sessPool, isValidator, ks)
@@ -308,17 +316,21 @@ func (*Manager) createSessionManager(
 		return nil, errors.Trace(err)
 	}
 
-	ddlSessPool := sess.NewSessionPool(sessPool)
-	sysTblMgr := systable.NewManager(ddlSessPool)
-	minJobIDRefresher := systable.NewMinJobIDRefresher(sysTblMgr)
-	isSyncer.SetMinJobIDRefresher(minJobIDRefresher)
-	ddlClient := newDDLClient(etcdCli, jobsubmit.SubmitOptions{
-		Store:             store,
-		SessPool:          ddlSessPool,
-		SysTblMgr:         sysTblMgr,
-		MinJobIDRefresher: minJobIDRefresher,
-		ServerStateSyncer: serverStateSyncer,
-	})
+	var minJobIDRefresher *systable.MinJobIDRefresher
+	var ddlClient *ddlClient
+	if !diagnosticmode.Enabled() {
+		ddlSessPool := sess.NewSessionPool(sessPool)
+		sysTblMgr := systable.NewManager(ddlSessPool)
+		minJobIDRefresher = systable.NewMinJobIDRefresher(sysTblMgr)
+		isSyncer.SetMinJobIDRefresher(minJobIDRefresher)
+		ddlClient = newDDLClient(etcdCli, jobsubmit.SubmitOptions{
+			Store:             store,
+			SessPool:          ddlSessPool,
+			SysTblMgr:         sysTblMgr,
+			MinJobIDRefresher: minJobIDRefresher,
+			ServerStateSyncer: serverStateSyncer,
+		})
+	}
 
 	mgr := &SessionManager{
 		ctx:               ctx,
@@ -337,18 +349,22 @@ func (*Manager) createSessionManager(
 		ddlClient:         ddlClient,
 	}
 
-	mgr.wg.RunWithLog(func() {
-		svrInfoSyncer.ServerInfoSyncLoop(store, mgr.exitCh)
-	})
+	if !diagnosticmode.Enabled() {
+		mgr.wg.RunWithLog(func() {
+			svrInfoSyncer.ServerInfoSyncLoop(store, mgr.exitCh)
+		})
+	}
 	mgr.wg.RunWithLog(func() {
 		isSyncer.SyncLoop(ctx)
 	})
-	mgr.wg.RunWithLog(func() {
-		isSyncer.MDLCheckLoop(ctx)
-	})
+	if !diagnosticmode.Enabled() {
+		mgr.wg.RunWithLog(func() {
+			isSyncer.MDLCheckLoop(ctx)
+		})
+	}
 	shouldRunMinJobIDRefresher := true
 	failpoint.InjectCall("skipMinJobIDRefresher", &shouldRunMinJobIDRefresher)
-	if shouldRunMinJobIDRefresher {
+	if shouldRunMinJobIDRefresher && !diagnosticmode.Enabled() {
 		mgr.wg.RunWithLog(func() {
 			minJobIDRefresher.Start(ctx)
 		})
