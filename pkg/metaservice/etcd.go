@@ -20,6 +20,7 @@ import (
 	"fmt"
 
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
+	"github.com/pingcap/tidb/pkg/config/diagnosticmode"
 	"github.com/pingcap/tidb/pkg/keyspace"
 	"github.com/pingcap/tidb/pkg/util"
 	"github.com/pingcap/tidb/pkg/util/diagnosticclient"
@@ -51,8 +52,9 @@ var defaultPDClientFactory PDClientFactory = func(
 	security pd.SecurityOption,
 	opts ...opt.ClientOption,
 ) (pd.Client, error) {
-	// When diagnostic mode is enabled, `PDClientOptions` will append some interceptors to the opts
-	opts = diagnosticclient.PDClientOptions(opts)
+	if diagnosticmode.Enabled() {
+		opts = append(opts, diagnosticclient.PDClientOption())
+	}
 	return pd.NewClientWithContext(ctx, callerComponent, svrAddrs, security, opts...)
 }
 

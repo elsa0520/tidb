@@ -33,13 +33,6 @@ func PDClientOption() opt.ClientOption {
 	return opt.WithGRPCDialOptions(grpc.WithChainUnaryInterceptor(pdUnary), grpc.WithChainStreamInterceptor(pdStream))
 }
 
-// PDClientOptions appends the PD guard only in diagnostic mode and otherwise returns opts unchanged.
-func PDClientOptions(opts []opt.ClientOption) []opt.ClientOption {
-	if !diagnosticmode.Enabled() {
-		return opts
-	}
-	return append(opts, PDClientOption())
-}
 func pdUnary(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, inv grpc.UnaryInvoker, opts ...grpc.CallOption) error {
 	switch method {
 	case "/pdpb.PD/GetMembers", "/pdpb.PD/GetStore", "/pdpb.PD/GetRegion":

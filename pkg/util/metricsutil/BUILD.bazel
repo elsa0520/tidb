@@ -8,6 +8,7 @@ go_library(
     deps = [
         "//br/pkg/task",
         "//pkg/config",
+        "//pkg/config/diagnosticmode",
         "//pkg/config/kerneltype",
         "//pkg/domain/metrics",
         "//pkg/executor/metrics",
