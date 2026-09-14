@@ -51,7 +51,9 @@ var defaultPDClientFactory PDClientFactory = func(
 	security pd.SecurityOption,
 	opts ...opt.ClientOption,
 ) (pd.Client, error) {
-	return pd.NewClientWithContext(ctx, callerComponent, svrAddrs, security, diagnosticclient.PDClientOptions(opts)...)
+	// When diagnostic mode is enabled, `PDClientOptions` will append some interceptors to the opts
+	opts = diagnosticclient.PDClientOptions(opts)
+	return pd.NewClientWithContext(ctx, callerComponent, svrAddrs, security, opts...)
 }
 
 // NewEtcdMetaServiceClient creates a ServiceClient backed by etcd and PD clients.
