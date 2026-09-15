@@ -37,6 +37,9 @@ func TestDiagnosticSQLAllowlist(t *testing.T) {
 		{name: "select", sql: "explain select 1", want: true},
 		{name: "union", sql: "explain select 1 union all select 2", want: true},
 		{name: "cte", sql: "explain with cte as (select 1 as a) select a from cte", want: true},
+		{name: "scalar subquery", sql: "explain select (select 1)", want: false},
+		{name: "where scalar subquery", sql: "explain select * from rider_reputation where lifetime_score < (select min(country_code) from rider_reputation)", want: false},
+		{name: "exists subquery", sql: "explain select 1 where exists (select 1)", want: false},
 		{name: "use", sql: "use test", want: true},
 		{name: "show databases", sql: "show databases", want: true},
 		{name: "show tables", sql: "show tables", want: true},
@@ -116,6 +119,8 @@ func TestDiagnosticSQLExecutionGuard(t *testing.T) {
 			"create table t (a int)",
 			"explain analyze select 1",
 			"explain select 1 for update",
+			"set global tidb_distsql_scan_concurrency=5;",
+			"explain select * from t where t.a < (select max(b) from t);",
 		} {
 			_, err = se.Execute(context.Background(), sql)
 			require.Error(t, err, sql)

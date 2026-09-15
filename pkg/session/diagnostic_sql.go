@@ -67,6 +67,19 @@ type diagnosticSQLChecker struct {
 
 func (c *diagnosticSQLChecker) Enter(node ast.Node) (skipChildren bool) {
 	switch n := node.(type) {
+	case *ast.CommonTableExpression:
+		// The SubqueryExpr stored on a CTE is the query definition itself,
+		// rather than an expression that the optimizer can evaluate as a
+		// scalar/EXISTS subquery. Walk its query directly so side effects in
+		// the definition are still checked without rejecting read-only CTEs.
+		if n.Query != nil && n.Query.Query != nil {
+			ast.Walk(n.Query.Query, c)
+		}
+		return true
+	case *ast.SubqueryExpr:
+		// Non-CTE subqueries may be evaluated by the optimizer while it is
+		// compiling EXPLAIN. Reject them before compilation can start.
+		c.denied = true
 	case *ast.SelectStmt:
 		// Any lock clause can cause TiKV lock-resolution or lock-writing
 		// requests even though the statement is syntactically a SELECT.
