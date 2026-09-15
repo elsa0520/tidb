@@ -2448,8 +2448,7 @@ func (s *session) executeStmtImpl(ctx context.Context, stmtNode ast.StmtNode) (r
 	// Reject user SQL before preparing a transaction or resetting statement
 	// state. Internal restricted SQL is used by diagnostic startup and metadata
 	// readers and must continue to run under the process-wide diagnostic mode.
-	if !s.sessionVars.InRestrictedSQL && !isDiagnosticSQLAllowed(stmtNode) {
-		// if diagnosticmode.Enabled() && !s.sessionVars.InRestrictedSQL && !isDiagnosticSQLAllowed(stmtNode) {
+	if diagnosticmode.Enabled() && !s.sessionVars.InRestrictedSQL && !isDiagnosticSQLAllowed(stmtNode) {
 		return nil, plannererrors.ErrSQLInReadOnlyMode
 	}
 
@@ -3276,8 +3275,7 @@ func (s *session) PrepareStmt(sql string) (stmtID uint32, paramCount int, fields
 	// allowlist. Reject them before preparing a transaction; otherwise
 	// COM_STMT_PREPARE could still allocate transaction state for a statement
 	// that will never be allowed to execute.
-	if !s.sessionVars.InRestrictedSQL {
-		// if diagnosticmode.Enabled() && !s.sessionVars.InRestrictedSQL {
+	if diagnosticmode.Enabled() && !s.sessionVars.InRestrictedSQL {
 		err = plannererrors.ErrSQLInReadOnlyMode
 		return
 	}
