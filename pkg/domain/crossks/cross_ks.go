@@ -285,12 +285,7 @@ func (*Manager) createSessionManager(
 	}
 	serverInfoRegistered = true
 
-	var schemaVerSyncer schemaver.Syncer
-	if diagnosticmode.Enabled() {
-		schemaVerSyncer = schemaver.NewDiagnosticSyncer()
-	} else {
-		schemaVerSyncer = schemaver.NewEtcdSyncer(etcdCli, virtualSvrID)
-	}
+	schemaVerSyncer := schemaver.NewEtcdSyncer(etcdCli, virtualSvrID)
 	if err = schemaVerSyncer.Init(ctx); err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -298,10 +293,8 @@ func (*Manager) createSessionManager(
 	// The submit-only DDL path refreshes server state synchronously before
 	// enqueue. Seed the cache here without Init, because Init starts an etcd
 	// watch/session that this runtime does not need or drain.
-	if !diagnosticmode.Enabled() {
-		if _, err = serverStateSyncer.GetGlobalState(ctx); err != nil {
-			return nil, errors.Trace(err)
-		}
+	if _, err = serverStateSyncer.GetGlobalState(ctx); err != nil {
+		return nil, errors.Trace(err)
 	}
 	infoCache := infoschema.NewCache(store, int(vardef.SchemaVersionCacheLimit.Load()))
 	isSyncer := issyncer.NewCrossKSSyncer(store, infoCache, vardef.GetSchemaLease(), sessPool, isValidator, ks)
@@ -316,21 +309,17 @@ func (*Manager) createSessionManager(
 		return nil, errors.Trace(err)
 	}
 
-	var minJobIDRefresher *systable.MinJobIDRefresher
-	var ddlClient *ddlClient
-	if !diagnosticmode.Enabled() {
-		ddlSessPool := sess.NewSessionPool(sessPool)
-		sysTblMgr := systable.NewManager(ddlSessPool)
-		minJobIDRefresher = systable.NewMinJobIDRefresher(sysTblMgr)
-		isSyncer.SetMinJobIDRefresher(minJobIDRefresher)
-		ddlClient = newDDLClient(etcdCli, jobsubmit.SubmitOptions{
-			Store:             store,
-			SessPool:          ddlSessPool,
-			SysTblMgr:         sysTblMgr,
-			MinJobIDRefresher: minJobIDRefresher,
-			ServerStateSyncer: serverStateSyncer,
-		})
-	}
+	ddlSessPool := sess.NewSessionPool(sessPool)
+	sysTblMgr := systable.NewManager(ddlSessPool)
+	minJobIDRefresher := systable.NewMinJobIDRefresher(sysTblMgr)
+	isSyncer.SetMinJobIDRefresher(minJobIDRefresher)
+	ddlClient := newDDLClient(etcdCli, jobsubmit.SubmitOptions{
+		Store:             store,
+		SessPool:          ddlSessPool,
+		SysTblMgr:         sysTblMgr,
+		MinJobIDRefresher: minJobIDRefresher,
+		ServerStateSyncer: serverStateSyncer,
+	})
 
 	mgr := &SessionManager{
 		ctx:               ctx,

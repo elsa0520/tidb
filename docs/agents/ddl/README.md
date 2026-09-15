@@ -91,18 +91,22 @@ sequenceDiagram
 
 ## Diagnostic schema loading
 
-Diagnostic mode selects `pkg/ddl/schemaver/diagnostic_syncer.go` before schema
-syncer initialization. The existing InfoSchema ticker still reloads storage
-metadata; schema version publication and MDL background checks are disabled.
-`serverinfo.Syncer` keeps local information and cluster reads but publishes no
-server or topology records. Its leases and min-start-ts reporting are omitted;
-the independent Domain serverID lease is retained.
+Diagnostic mode continues to use the ordinary Etcd schema syncer. The Domain
+schema-sync loop and InfoSchema reloads remain active so a diagnostic instance
+can load the existing schema, while MDL checking is skipped. Diagnostic startup
+requires an already bootstrapped keyspace and reads persisted startup settings
+without writing them back.
 
-`DDL.Start` returns before allocating DDL pools, system-table managers, statistics
-or background workers. Domain and cross-keyspace runtimes skip their DDL-only
-pool/refresher setup. This changes only the DDL component lifecycle: SQL rejection,
-DXF startup isolation and bootstrap/upgrade protection are deferred. In particular,
-a stopped submit loop is not a safe rejection mechanism for new DDL requests.
+`serverinfo.Syncer` does not register or refresh server and topology records in
+diagnostic mode; the independent Domain server-ID lease remains active. The
+regular min-start-ts reporting path is not disabled by diagnostic mode.
+
+`DDL.Start` returns immediately for `Normal` startup, without starting DDL
+execution resources. It returns `diagnosticmode.ErrDDLNotAllowed` for
+`Bootstrap`, `Upgrade`, and `BR` startup modes. `EnableDDL` and `SwitchMDL`
+also return that error, while `DisableDDL` is a no-op. Cross-keyspace runtimes
+skip server-info, MDL, and min-job-ID refresher background loops in diagnostic
+mode.
 
 ## Code map (where to look first)
 

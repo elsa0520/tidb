@@ -81,8 +81,7 @@ func (s *SyncSummary) String() string {
 // DDL owner will use this interface to update the global schema version, and wait
 // all followers to update schema to the target version.
 // followers use it to receive version change events, reload schema and update their
-// version. Diagnostic implementations may omit registration and return nil event
-// channels to keep only the caller's periodic schema reload active.
+// version.
 type Syncer interface {
 	// Init sets the global schema version path to etcd if it isn't exist,
 	// then watch this path, and initializes the self schema version to etcd.

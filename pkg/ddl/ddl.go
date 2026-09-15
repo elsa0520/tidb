@@ -754,21 +754,15 @@ func newDDL(ctx context.Context, options ...Option) (*ddl, *executor) {
 		// The etcdCli is nil if the store is localstore which is only used for testing.
 		// So we use mockOwnerManager and memSyncer.
 		manager = owner.NewMockManager(ctx, id, opt.Store, util.DDLOwnerKey)
+		schemaVerSyncer = schemaver.NewMemSyncer()
 		serverStateSyncer = serverstate.NewMemSyncer()
 	} else {
 		ownerMgr := getOwnerManager(opt.Store)
 		id = ownerMgr.ID()
 		manager = ownerMgr.OwnerManager()
+		schemaVerSyncer = schemaver.NewEtcdSyncer(etcdCli, id)
 		serverStateSyncer = serverstate.NewEtcdSyncer(etcdCli, util.ServerGlobalState)
 		deadLockCkr = util.NewDeadTableLockChecker(etcdCli)
-	}
-
-	if diagnosticmode.Enabled() {
-		schemaVerSyncer = schemaver.NewDiagnosticSyncer()
-	} else if opt.EtcdCli == nil {
-		schemaVerSyncer = schemaver.NewMemSyncer()
-	} else {
-		schemaVerSyncer = schemaver.NewEtcdSyncer(opt.EtcdCli, id)
 	}
 
 	// TODO: make store and infoCache explicit arguments

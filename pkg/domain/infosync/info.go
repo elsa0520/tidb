@@ -35,7 +35,6 @@ import (
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/pingcap/log"
 	"github.com/pingcap/tidb/pkg/config"
-	"github.com/pingcap/tidb/pkg/config/diagnosticmode"
 	"github.com/pingcap/tidb/pkg/ddl/label"
 	"github.com/pingcap/tidb/pkg/ddl/placement"
 	"github.com/pingcap/tidb/pkg/ddl/util"
@@ -608,9 +607,6 @@ func (is *InfoSyncer) getEtcdClientForMinStartTS() *clientv3.Client {
 
 // storeMinStartTS stores self server min start timestamp to etcd.
 func (is *InfoSyncer) storeMinStartTS(ctx context.Context, session *concurrency.Session) error {
-	if diagnosticmode.Enabled() {
-		return nil
-	}
 	cli := is.getEtcdClientForMinStartTS()
 	if cli == nil {
 		return nil
@@ -622,9 +618,6 @@ func (is *InfoSyncer) storeMinStartTS(ctx context.Context, session *concurrency.
 
 // RemoveMinStartTS removes self server min start timestamp from etcd.
 func (is *InfoSyncer) RemoveMinStartTS() {
-	if diagnosticmode.Enabled() {
-		return
-	}
 	cli := is.getEtcdClientForMinStartTS()
 	if cli == nil {
 		return
@@ -637,9 +630,6 @@ func (is *InfoSyncer) RemoveMinStartTS() {
 
 // ReportMinStartTS reports self server min start timestamp to ETCD.
 func (is *InfoSyncer) ReportMinStartTS(store kv.Storage, session *concurrency.Session) {
-	if diagnosticmode.Enabled() {
-		return
-	}
 	sm := is.GetSessionManager()
 	if sm == nil {
 		return
