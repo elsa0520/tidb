@@ -18,11 +18,14 @@ import (
 	"context"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/pingcap/tidb/pkg/config"
 	"github.com/pingcap/tidb/pkg/config/diagnosticmode"
+	"github.com/pingcap/tidb/pkg/ddl/schemaver"
 	"github.com/pingcap/tidb/pkg/domain/infosync"
 	"github.com/pingcap/tidb/pkg/keyspace"
+	"github.com/pingcap/tidb/pkg/store/mockstore"
 	"github.com/pingcap/tidb/pkg/util/intest"
 	"github.com/stretchr/testify/require"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -70,4 +73,36 @@ func TestDiagnosticServerID(t *testing.T) {
 			require.Zero(t, first.ServerID())
 		})
 	}
+}
+
+func TestStartDiagnostic(t *testing.T) {
+	if !intest.InTest {
+		t.Skip("requires intest")
+	}
+	t.Cleanup(diagnosticmode.SetForTest(true))
+
+	store, err := mockstore.NewMockStore()
+	require.NoError(t, err)
+	dom := NewDomain(store, 80*time.Millisecond, 0, 0, mockFactory)
+	defer dom.Close()
+	t.Cleanup(func() { require.NoError(t, store.Close()) })
+	require.Nil(t, dom.ddl)
+	require.Nil(t, dom.minJobIDRefresher)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	dom.ctx = ctx
+	cancel()
+	info, err := infosync.GlobalInfoSyncerInit(ctx, "diagnostic", dom.ServerID,
+		nil, nil, nil, nil, keyspace.CodecV1, true, dom.infoCache)
+	require.NoError(t, err)
+	dom.info = info
+	schemaSyncer := schemaver.NewMemSyncer()
+	require.NoError(t, schemaSyncer.Init(ctx))
+	dom.isSyncer.InitRequiredFields(nil, schemaSyncer, nil, nil)
+
+	require.NoError(t, dom.StartDiagnostic())
+	require.Nil(t, dom.ddl)
+	require.Nil(t, dom.minJobIDRefresher)
+	require.Nil(t, dom.info.ServerInfoSyncer().Done())
+	require.Nil(t, dom.info.ServerInfoSyncer().TopologyDone())
 }

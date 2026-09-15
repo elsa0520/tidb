@@ -827,7 +827,6 @@ func (do *Domain) Start(startMode ddl.StartMode) error {
 	}
 	do.minJobIDRefresher = do.ddl.GetMinJobIDRefresher()
 	do.isSyncer.SetMinJobIDRefresher(do.minJobIDRefresher)
-
 	// Local store needs to get the change information for every DDL state in each session.
 	do.wg.Run(func() {
 		do.isSyncer.SyncLoop(do.ctx)
@@ -856,14 +855,15 @@ func (do *Domain) Start(startMode ddl.StartMode) error {
 	}
 
 	if startMode != ddl.BR {
-		if err := do.initLogBackup(do.ctx, pdCli); err != nil {
+		err = do.initLogBackup(do.ctx, pdCli)
+		if err != nil {
 			return err
 		}
 	}
 
 	// right now we only allow access system keyspace info schema after fully bootstrap.
 	if kv.IsUserKS(do.store) && startMode == ddl.Normal {
-		if err := do.loadSysKSInfoSchema(); err != nil {
+		if err = do.loadSysKSInfoSchema(); err != nil {
 			return err
 		}
 	}
