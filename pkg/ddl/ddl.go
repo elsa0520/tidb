@@ -1110,6 +1110,9 @@ func (d *ddl) CleanUpTempDirLoop(ctx context.Context, path string) {
 // Since ownerManager.CampaignOwner will start a new goroutine to run ownerManager.campaignLoop,
 // we should make sure that before invoking EnableDDL(), ddl is DISABLE.
 func (d *ddl) EnableDDL() error {
+	if diagnosticmode.Enabled() {
+		return diagnosticmode.ErrDDLNotAllowed
+	}
 	err := d.ownerManager.CampaignOwner()
 	return errors.Trace(err)
 }
