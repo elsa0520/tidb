@@ -32,6 +32,7 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/tidb/pkg/config"
+	"github.com/pingcap/tidb/pkg/config/diagnosticmode"
 	"github.com/pingcap/tidb/pkg/config/kerneltype"
 	"github.com/pingcap/tidb/pkg/ddl/ingest"
 	"github.com/pingcap/tidb/pkg/ddl/logutil"
@@ -1109,6 +1110,9 @@ func (d *ddl) CleanUpTempDirLoop(ctx context.Context, path string) {
 // Since ownerManager.CampaignOwner will start a new goroutine to run ownerManager.campaignLoop,
 // we should make sure that before invoking EnableDDL(), ddl is DISABLE.
 func (d *ddl) EnableDDL() error {
+	if diagnosticmode.Enabled() {
+		return diagnosticmode.ErrDDLNotAllowed
+	}
 	err := d.ownerManager.CampaignOwner()
 	return errors.Trace(err)
 }
@@ -1248,6 +1252,9 @@ func (d *ddl) cleanDeadTableLock(unlockTables []model.TableLockTpInfo, se model.
 
 // SwitchMDL enables MDL or disable MDL.
 func (d *ddl) SwitchMDL(enable bool) error {
+	if diagnosticmode.Enabled() {
+		return diagnosticmode.ErrDDLNotAllowed
+	}
 	isEnableBefore := vardef.IsMDLEnabled()
 	if isEnableBefore == enable {
 		return nil
