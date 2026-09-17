@@ -5,7 +5,10 @@ go_library(
     srcs = ["main.go"],
     importpath = "github.com/pingcap/tidb/tests/integrationtest/diagnostictest",
     visibility = ["//visibility:private"],
-    deps = ["@com_github_go_sql_driver_mysql//:mysql"],
+    deps = [
+        "@com_github_go_sql_driver_mysql//:mysql",
+        "@io_etcd_go_etcd_client_v3//:client",
+    ],
 )
 
 go_binary(
