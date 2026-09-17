@@ -19,6 +19,10 @@ self_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
 if [[ "${1:-}" == "--tiup-node" ]]; then
     shift
+    # Keep the complete node logs outside TiUP's data directory so failed
+    # assertions remain diagnosable after `tiup clean`.
+    node_log="${DIAGNOSTIC_TEST_LOG_DIR}/$(basename "$PWD").log"
+    set -- "$@" --log-file="$node_log" -L info
     if [[ "$(basename "$PWD")" == tidb-1 ]]; then
         for ((i=0; i<120; i++)); do
             if curl -fsS --max-time 2 http://127.0.0.1:10080/status >/dev/null 2>&1; then
@@ -65,6 +69,7 @@ if [[ "$server_help" != *-diagnostic-mode* ]]; then
 fi
 
 test_dir=$(mktemp -d "${TMPDIR:-/tmp}/tidb-diagnostic-online-ddl.XXXXXX")
+export DIAGNOSTIC_TEST_LOG_DIR="$test_dir"
 import_file="${test_dir}/import.csv"
 printf '1,100\n2,200\n3,300\n' > "${import_file}"
 
@@ -89,6 +94,33 @@ cleanup_tidb() {
 trap cleanup_tidb EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
+
+check_ddl_start_logs() {
+    local normal_log="$test_dir/tidb-0.log"
+    local diagnostic_log="$test_dir/tidb-1.log"
+    local status
+    # Missing/empty logs must fail, not masquerade as absence of DDL startup.
+    if [[ ! -r "$normal_log" || ! -s "$normal_log" || ! -r "$diagnostic_log" || ! -s "$diagnostic_log" ]]; then
+        echo 'Missing or empty TiDB logs; cannot verify DDL startup' >&2
+        return 1
+    fi
+    if ! grep -F '"start DDL"' "$normal_log" >/dev/null; then
+        echo "Normal TiDB is missing the expected start DDL log: $normal_log" >&2
+        return 1
+    fi
+    if grep -nF '"start DDL"' "$diagnostic_log"; then
+        echo "Diagnostic TiDB unexpectedly started DDL: $diagnostic_log" >&2
+        return 1
+    else
+        status=$?
+        if [[ "$status" != 1 ]]; then
+            echo "Failed to read Diagnostic TiDB log: $diagnostic_log" >&2
+            return "$status"
+        fi
+    fi
+    echo 'DDL startup logs verified: normal present, Diagnostic absent'
+}
+
 for port in 2379 2380 4000 4001 10080 10081 20160 20180; do
     if lsof -nP -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1; then
         echo "Required port $port is already in use" >&2
@@ -106,8 +138,10 @@ for ((i=0; i<180; i++)); do
         exit 1
     fi
     if curl -fsS --max-time 2 http://127.0.0.1:10081/status >/dev/null 2>&1; then
+        check_ddl_start_logs
         go run ./diagnostictest -normal-port "$normal_port" -diagnostic-port "$diagnostic_port" \
             -etcd-endpoint 127.0.0.1:2379 -keyspace "" -import-file "$import_file"
+        check_ddl_start_logs
         echo "Diagnostic online DDL tests passed"
         exit 0
     fi
