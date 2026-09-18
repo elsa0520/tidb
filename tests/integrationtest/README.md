@@ -26,14 +26,37 @@ This script sets up a real cluster environment and then invokes `run-tests.sh` w
 
 ### 3. Diagnostic Mode Runner
 
-Run the diagnostic-mode DDL integration test against a persistent UniStore:
+Run the diagnostic-mode DDL integration tests:
 
 ```sh
 ./run-diagnostic-tests.sh
 ```
 
-The runner first starts TiDB normally to bootstrap the temporary store, then
-restarts TiDB with `--diagnostic-mode` and runs `ddl/diagnostic_mode`.
+The runner uses `tiup update playground pd tikv tidb` to download the latest
+stable packages, then starts one PD, one TiKV and two TiDB processes through
+`tiup playground --db 2`. A TiDB wrapper waits for the normal node to bootstrap
+before starting the second node with `--diagnostic-mode`. TiUP cleans up this
+test's uniquely tagged cluster on exit; failed runs retain the runner log.
+
+The published TiDB package must support `--diagnostic-mode`. Otherwise, use a
+binary built from this branch (an absolute path is recommended):
+
+```sh
+TIDB_SERVER_BIN=/absolute/path/to/tidb-server ./run-diagnostic-tests.sh
+```
+
+The runner checks Add Index and Import Into on the normal node, schema reload
+via `SHOW CREATE TABLE` on Diagnostic, and absence of Diagnostic serverinfo
+in Etcd. It checks imported data only on the normal node. This stable-package
+playground uses the classic, unnamespaced environment; it does not exercise
+the next-gen SYSTEM/user-Keyspace cross-KS path, which requires compatible
+next-gen components.
+
+The original UniStore read-only test is available separately:
+
+```sh
+DIAGNOSTIC_LEGACY_TEST=1 ./run-diagnostic-tests.sh -s /absolute/path/to/tidb-server
+```
 
 ---
 
